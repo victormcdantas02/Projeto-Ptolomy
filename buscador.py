@@ -1,57 +1,54 @@
+import re
 import requests
 
 
-# 1. Busca simulada (temporária)
-def buscar_fontes(afirmacao):
+# Configuração da Wikipédia
+URL_WIKIPEDIA = "https://pt.wikipedia.org/w/api.php"
 
-    artigos = pesquisar_wikipedia(afirmacao)
-
-    fontes = []
-
-    for artigo in artigos:
-
-        resumo = obter_resumo_wikipedia(
-            artigo["pagina_id"]
-        )
-
-        fonte = {
-         "titulo": resumo["titulo"],
-         "descricao": resumo["resumo"][:500],
-         "url": (
-          "https://pt.wikipedia.org/?curid="
-         + str(artigo["pagina_id"])
-         )
-         }
+HEADERS = {
+    "User-Agent": "ProjetoPtolomy/1.0 (projeto academico)"
+}
 
 
-        fontes.append(fonte)
+# PASSO 1 - Preparar o termo de busca
+def preparar_termo_busca(afirmacao):
 
-    return {
-        "afirmacao": afirmacao,
-        "fontes": fontes
+    palavras_ignoradas = {
+        "o", "a", "os", "as",
+        "um", "uma", "de", "do", "da",
+        "dos", "das", "em", "no", "na",
+        "e", "possui", "tem", "é"
     }
 
+    palavras = re.findall(
+        r"[a-zA-ZÀ-ÿ]+",
+        afirmacao.lower()
+    )
+
+    palavras_chave = []
+
+    for palavra in palavras:
+        if palavra not in palavras_ignoradas:
+            palavras_chave.append(palavra)
+
+    return " ".join(palavras_chave)
 
 
-# 2. Pesquisar artigos na Wikipédia
+# PASSO 2 - Pesquisar artigos na Wikipédia
 def pesquisar_wikipedia(termo):
-
-    url = "https://pt.wikipedia.org/w/api.php"
 
     parametros = {
         "action": "query",
         "list": "search",
         "srsearch": termo,
-        "format": "json",
-        "srlimit": 3
+        "srlimit": 3,
+        "format": "json"
     }
 
     resposta = requests.get(
-        url,
+        URL_WIKIPEDIA,
         params=parametros,
-        headers={
-            "User-Agent": "VerificadorIAAcademico/0.1 (projeto educacional)"
-        },
+        headers=HEADERS,
         timeout=10
     )
 
@@ -59,21 +56,11 @@ def pesquisar_wikipedia(termo):
 
     dados = resposta.json()
 
-    resultados = []
-
-    for artigo in dados["query"]["search"]:
-        resultados.append({
-            "titulo": artigo["title"],
-            "pagina_id": artigo["pageid"]
-        })
-
-    return resultados
+    return dados["query"]["search"]
 
 
-# 3. Recuperar resumo de um artigo
+# PASSO 3 - Obter o resumo de um artigo
 def obter_resumo_wikipedia(pagina_id):
-
-    url = "https://pt.wikipedia.org/w/api.php"
 
     parametros = {
         "action": "query",
@@ -85,11 +72,9 @@ def obter_resumo_wikipedia(pagina_id):
     }
 
     resposta = requests.get(
-        url,
+        URL_WIKIPEDIA,
         params=parametros,
-        headers={
-            "User-Agent": "VerificadorIAAcademico/0.1 (projeto educacional)"
-        },
+        headers=HEADERS,
         timeout=10
     )
 
@@ -99,27 +84,45 @@ def obter_resumo_wikipedia(pagina_id):
 
     pagina = dados["query"]["pages"][str(pagina_id)]
 
+    return pagina.get("extract", "")[:500]
+
+
+# PASSO 4 - Buscar fontes para uma afirmação
+def buscar_fontes(afirmacao):
+
+    fontes = []
+
+    # Por enquanto, mantemos a busca original.
+    # A nova função será integrada no próximo passo.
+    termo_busca = preparar_termo_busca(afirmacao)
+ 
+    resultados = pesquisar_wikipedia(termo_busca)
+
+    for resultado in resultados:
+
+        pagina_id = resultado["pageid"]
+
+        resumo = obter_resumo_wikipedia(pagina_id)
+
+        fonte = {
+            "titulo": resultado["title"],
+            "descricao": resumo,
+            "url": f"https://pt.wikipedia.org/?curid={pagina_id}"
+        }
+
+        fontes.append(fonte)
+
     return {
-        "titulo": pagina.get("title", ""),
-        "resumo": pagina.get("extract", "")
+        "afirmacao": afirmacao,
+        "fontes": fontes
     }
 
 
-# 4. Testar as funções
+# PASSO 5 - Testar a nova função
 if __name__ == "__main__":
 
-    artigos = pesquisar_wikipedia("Estados do Brasil")
+    afirmacao = "O Brasil possui 30 estados."
 
-    print("ARTIGOS ENCONTRADOS:")
-    print(artigos)
+    termo = preparar_termo_busca(afirmacao)
 
-    if artigos:
-
-        primeiro_artigo = artigos[0]
-
-        resumo = obter_resumo_wikipedia(
-            primeiro_artigo["pagina_id"]
-        )
-
-        print("\nRESUMO DO PRIMEIRO ARTIGO:")
-        print(resumo)
+    print("Termo de busca:", termo)
