@@ -1,4 +1,5 @@
-from fastapi import FastAPI
+import requests
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from verificador import analisar_texto
@@ -25,6 +26,10 @@ def verificar(dados: TextoIA):
 
     texto_recebido = dados.texto
 
-    resultado = analisar_texto(texto_recebido)
+    try:
+        resultado = analisar_texto(texto_recebido)
+    except requests.RequestException:
+        # Wikipédia fora do ar ou sem internet
+        raise HTTPException(status_code=503, detail="Serviço de fontes indisponível")
 
     return resultado
