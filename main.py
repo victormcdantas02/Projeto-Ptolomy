@@ -1,8 +1,17 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from verificador import analisar_texto
 
 app = FastAPI()
+
+# Libera o index.html (aberto no navegador) para chamar a API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"]
+)
 
 class TextoIA(BaseModel):
     texto: str
