@@ -84,7 +84,8 @@ def analisar_texto(texto):
                 "comparacoes": resultado_comparacao,
                 "resumo_evidencias": resumo,
                 "resultado_geral": resultado_geral,
-                "fontes_relevantes": fontes_relevantes
+                "fontes_relevantes": fontes_relevantes,
+                "evidencias": montar_evidencias(fontes_relevantes)
             }
 
             afirmacoes.append(afirmacao)
