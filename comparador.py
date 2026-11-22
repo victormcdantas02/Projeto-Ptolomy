@@ -98,7 +98,8 @@ def extrair_palavras_chave(afirmacao):
 
 def filtrar_frases_por_contexto(evidencia, palavras_chave):
 
-    frases = re.split(r"[.!?]", evidencia)
+    # Corta no ponto final, mas não no ponto de números como "5.571"
+    frases = re.split(r"[.!?](?!\d)", evidencia)
 
     relevantes = []
 
