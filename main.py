@@ -16,7 +16,7 @@ app.add_middleware(
 
 class TextoIA(BaseModel):
     # Texto muito curto não dá contexto para buscar
-    texto: str = Field(min_length=15)
+    texto: str = Field(min_length=15, max_length=2000)
 
 @app.get("/")
 def inicio():
