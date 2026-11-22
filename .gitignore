@@ -9,5 +9,8 @@ venv/
 # Arquivos com variáveis de ambiente
 .env
 
+# Banco de dados local (cada um tem o seu)
+ptolomy.db
+
 # Configurações locais
 .vscode/
