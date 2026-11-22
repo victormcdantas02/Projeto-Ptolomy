@@ -12,6 +12,12 @@ uvicorn main:app --reload
 
 Depois abra o arquivo `index.html` no navegador.
 
+## Testes
+
+```
+python -m pytest
+```
+
 ## Arquivos
 
 - `main.py` — API (FastAPI) com a rota `POST /verificar`
