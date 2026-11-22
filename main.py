@@ -1,7 +1,7 @@
 import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from verificador import analisar_texto
 
 app = FastAPI()
@@ -15,7 +15,8 @@ app.add_middleware(
 )
 
 class TextoIA(BaseModel):
-    texto: str
+    # Texto muito curto não dá contexto para buscar
+    texto: str = Field(min_length=15)
 
 @app.get("/")
 def inicio():
