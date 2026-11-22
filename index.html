@@ -364,6 +364,7 @@ const FONTES_PADRAO = [
   ['Agência Brasil', 'agenciabrasil.ebc.com.br', 'imprensa'],
   ['Aos Fatos', 'aosfatos.org', 'imprensa'],
   ['g1 — Fato ou Fake', 'g1.globo.com', 'imprensa'],
+  ['Wikipédia', 'pt.wikipedia.org', 'outra', 'Usada pelo backend em Python na busca automática.'],
   ['Blog pessoal (exemplo)', 'exemplo-blog.com', 'outra', 'Fonte fictícia, usada só para demonstrar fontes não confiáveis.', true],
 ];
 
@@ -1483,6 +1484,11 @@ async function iniciar() {
   $('#app').innerHTML = `<main style="text-align:center;padding:80px 16px" aria-busy="true">${mascote(72)}<p class="muted">Preparando a Ptolomy.AI…</p></main>`;
   if (!DB.carregar() || !DB.data.usuarios) await criarDadosDemo();
   DB.data.config = DB.data.config || { simularFalha: false };
+  // Quem já tinha dados salvos ganha a fonte Wikipédia
+  if (!DB.data.fontes_confiaveis.some(f => f.dominio === 'pt.wikipedia.org')) {
+    DB.data.fontes_confiaveis.push({ id: uid('fnt'), nome: 'Wikipédia', dominio: 'pt.wikipedia.org', tipo: 'outra', peso: PESO_PADRAO.outra, ativa: true, observacao: 'Usada pelo backend em Python na busca automática.', ficticia: false, data_atualizacao: agoraISO() });
+    DB.salvar();
+  }
   window.addEventListener('hashchange', render);
   ['click', 'keydown'].forEach(ev => document.addEventListener(ev, renovarSessao, { passive: true }));
   setInterval(() => { if (lerSessao() && !usuarioAtual()) render(); }, 60000); // detecta sessão expirada
