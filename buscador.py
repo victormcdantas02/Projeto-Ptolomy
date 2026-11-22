@@ -1,5 +1,6 @@
-import re
 import requests
+
+from comparador import extrair_palavras_chave
 
 
 # Configuração da Wikipédia
@@ -13,23 +14,8 @@ HEADERS = {
 # PASSO 1 - Preparar o termo de busca
 def preparar_termo_busca(afirmacao):
 
-    palavras_ignoradas = {
-        "o", "a", "os", "as",
-        "um", "uma", "de", "do", "da",
-        "dos", "das", "em", "no", "na",
-        "e", "possui", "tem", "é"
-    }
-
-    palavras = re.findall(
-        r"[a-zA-ZÀ-ÿ]+",
-        afirmacao.lower()
-    )
-
-    palavras_chave = []
-
-    for palavra in palavras:
-        if palavra not in palavras_ignoradas:
-            palavras_chave.append(palavra)
+    # Usa a mesma lista de palavras ignoradas do comparador
+    palavras_chave = extrair_palavras_chave(afirmacao)
 
     return " ".join(palavras_chave)
 
