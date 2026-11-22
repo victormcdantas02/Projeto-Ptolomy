@@ -79,7 +79,7 @@ def analisar_texto(texto):
             afirmacao = {
                 "id": len(afirmacoes) + 1,
                 "texto": frase,
-                "status_verificacao": "pendente",
+                "status_verificacao": "concluida",
                 "fontes": resultado_busca["fontes"],
                 "comparacoes": resultado_comparacao,
                 "resumo_evidencias": resumo,
