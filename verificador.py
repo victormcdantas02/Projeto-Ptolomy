@@ -8,13 +8,41 @@ from comparador import (
     filtrar_fontes_com_evidencias
 )
 
+# Resultado da comparação -> posição que o site mostra
+POSICOES = {
+    "compatibilidade_numerica": "confirma",
+    "divergencia_numerica": "contradiz"
+}
+
+
+def montar_evidencias(fontes_relevantes):
+
+    evidencias = []
+
+    for fonte in fontes_relevantes:
+
+        # Resume as frases desta fonte e vê se ela confirma ou contradiz
+        resumo = resumir_evidencias([fonte])
+        resultado = determinar_resultado_geral(resumo)
+
+        evidencias.append({
+            "titulo": fonte["titulo"],
+            "url": fonte["url"],
+            "posicao": POSICOES.get(resultado, "neutra"),
+            "trecho": fonte["comparacoes"][0]["frase"]
+        })
+
+    return evidencias
+
+
 def analisar_texto(texto):
 
     afirmacoes = []
     perguntas = []
 
     # 1. Separar o texto em frases
-    frases = re.findall(r"[^.!?]+[.!?]?", texto)
+    # (corta depois de . ! ? seguido de espaço, para não quebrar "5.571")
+    frases = re.split(r"(?<=[.!?])\s+", texto)
 
     # 2. Analisar cada frase
     for frase in frases:
@@ -51,12 +79,13 @@ def analisar_texto(texto):
             afirmacao = {
                 "id": len(afirmacoes) + 1,
                 "texto": frase,
-                "status_verificacao": "pendente",
+                "status_verificacao": "concluida",
                 "fontes": resultado_busca["fontes"],
                 "comparacoes": resultado_comparacao,
                 "resumo_evidencias": resumo,
                 "resultado_geral": resultado_geral,
-                "fontes_relevantes": fontes_relevantes
+                "fontes_relevantes": fontes_relevantes,
+                "evidencias": montar_evidencias(fontes_relevantes)
             }
 
             afirmacoes.append(afirmacao)

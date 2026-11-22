@@ -34,38 +34,21 @@ def preparar_termo_busca(afirmacao):
     return " ".join(palavras_chave)
 
 
-# PASSO 2 - Pesquisar artigos na Wikipédia
+# PASSO 2 - Pesquisar artigos na Wikipédia (já com o resumo de cada um)
 def pesquisar_wikipedia(termo):
 
+    # Sem palavras-chave não tem o que buscar
+    if not termo:
+        return []
+
+    # Uma requisição só: busca 3 artigos e traz o resumo deles
+    # (antes eram 4 requisições e a Wikipédia bloqueava com erro 429)
     parametros = {
         "action": "query",
-        "list": "search",
-        "srsearch": termo,
-        "srlimit": 3,
-        "format": "json"
-    }
-
-    resposta = requests.get(
-        URL_WIKIPEDIA,
-        params=parametros,
-        headers=HEADERS,
-        timeout=10
-    )
-
-    resposta.raise_for_status()
-
-    dados = resposta.json()
-
-    return dados["query"]["search"]
-
-
-# PASSO 3 - Obter o resumo de um artigo
-def obter_resumo_wikipedia(pagina_id):
-
-    parametros = {
-        "action": "query",
+        "generator": "search",
+        "gsrsearch": termo,
+        "gsrlimit": 3,
         "prop": "extracts",
-        "pageids": pagina_id,
         "exintro": True,
         "explaintext": True,
         "format": "json"
@@ -82,31 +65,28 @@ def obter_resumo_wikipedia(pagina_id):
 
     dados = resposta.json()
 
-    pagina = dados["query"]["pages"][str(pagina_id)]
+    paginas = dados.get("query", {}).get("pages", {})
 
-    return pagina.get("extract", "")[:500]
+    # Mantém a ordem de relevância da busca
+    return sorted(paginas.values(), key=lambda pagina: pagina["index"])
 
 
-# PASSO 4 - Buscar fontes para uma afirmação
+# PASSO 3 - Buscar fontes para uma afirmação
 def buscar_fontes(afirmacao):
 
     fontes = []
 
-    # Por enquanto, mantemos a busca original.
-    # A nova função será integrada no próximo passo.
     termo_busca = preparar_termo_busca(afirmacao)
- 
+
     resultados = pesquisar_wikipedia(termo_busca)
 
     for resultado in resultados:
 
         pagina_id = resultado["pageid"]
 
-        resumo = obter_resumo_wikipedia(pagina_id)
-
         fonte = {
             "titulo": resultado["title"],
-            "descricao": resumo,
+            "descricao": resultado.get("extract", "")[:500],
             "url": f"https://pt.wikipedia.org/?curid={pagina_id}"
         }
 
@@ -118,7 +98,7 @@ def buscar_fontes(afirmacao):
     }
 
 
-# PASSO 5 - Testar a nova função
+# PASSO 4 - Testar a nova função
 if __name__ == "__main__":
 
     afirmacao = "O Brasil possui 30 estados."
