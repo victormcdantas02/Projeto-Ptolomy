@@ -3,8 +3,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from verificador import analisar_texto
+from banco import criar_tabela
 
 app = FastAPI()
+
+# Garante que a tabela de análises existe
+criar_tabela()
 
 # Libera o index.html (aberto no navegador) para chamar a API
 app.add_middleware(
