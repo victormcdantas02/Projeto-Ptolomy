@@ -219,6 +219,7 @@ def comparar_com_fontes(afirmacao, fontes):
 
         resultados.append({
             "titulo": fonte["titulo"],
+            "url": fonte.get("url"),
             "comparacoes": comparacoes
         })
 
