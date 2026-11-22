@@ -124,7 +124,8 @@ def filtrar_frases_por_contexto(evidencia, palavras_chave):
 # 7. Extrair número associado a uma palavra
 def extrair_numero_associado(texto, palavra):
 
-    padrao = rf"(\d+)\s+{re.escape(palavra)}\b"
+    # Aceita números com ponto, como "5.571"
+    padrao = rf"(\d[\d.]*)\s+{re.escape(palavra)}\b"
 
     resultado = re.search(
         padrao,
@@ -133,7 +134,7 @@ def extrair_numero_associado(texto, palavra):
     )
 
     if resultado:
-        return int(resultado.group(1))
+        return int(resultado.group(1).replace(".", ""))
 
     return None
 
