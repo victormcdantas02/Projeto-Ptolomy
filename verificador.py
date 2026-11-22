@@ -14,7 +14,8 @@ def analisar_texto(texto):
     perguntas = []
 
     # 1. Separar o texto em frases
-    frases = re.findall(r"[^.!?]+[.!?]?", texto)
+    # (corta depois de . ! ? seguido de espaço, para não quebrar "5.571")
+    frases = re.split(r"(?<=[.!?])\s+", texto)
 
     # 2. Analisar cada frase
     for frase in frases:
