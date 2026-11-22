@@ -1,4 +1,6 @@
+import json
 import sqlite3
+from datetime import datetime
 
 # Arquivo do banco de dados (criado sozinho na primeira vez)
 ARQUIVO_BANCO = "ptolomy.db"
@@ -32,3 +34,59 @@ def criar_tabela():
 
     conexao.commit()
     conexao.close()
+
+
+# Transforma uma linha do banco em dicionário (o JSON volta a ser lista/dicionário)
+def linha_para_dict(linha):
+
+    analise = dict(linha)
+    analise["resultado"] = json.loads(analise["resultado"])
+    analise["fontes"] = json.loads(analise["fontes"])
+
+    return analise
+
+
+# CREATE - salva uma análise nova e devolve o id dela
+def salvar_analise(usuario_id, texto, ia_origem, resultado, fontes):
+
+    conexao = conectar()
+
+    cursor = conexao.execute(
+        """INSERT INTO analises
+           (usuario_id, texto, ia_origem, resultado, fontes, status_validacao, observacao, data)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            usuario_id,
+            texto,
+            ia_origem,
+            json.dumps(resultado, ensure_ascii=False),
+            json.dumps(fontes, ensure_ascii=False),
+            "não verificado",
+            "",
+            datetime.now().isoformat(timespec="seconds")
+        )
+    )
+
+    conexao.commit()
+    novo_id = cursor.lastrowid
+    conexao.close()
+
+    return novo_id
+
+
+# READ - busca uma análise pelo id (None se não existir)
+def buscar_analise(analise_id):
+
+    conexao = conectar()
+
+    linha = conexao.execute(
+        "SELECT * FROM analises WHERE id = ?",
+        (analise_id,)
+    ).fetchone()
+
+    conexao.close()
+
+    if linha is None:
+        return None
+
+    return linha_para_dict(linha)
