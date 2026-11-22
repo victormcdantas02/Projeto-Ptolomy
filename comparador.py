@@ -2,74 +2,7 @@
 import re
 
 
-# 1. Extrair números de um texto
-def extrair_numeros(texto):
-
-    numeros = re.findall(r"\d+", texto)
-
-    return numeros
-
-
-# 2. Comparar números entre dois textos
-def comparar_numeros(afirmacao, evidencia):
-
-    numeros_afirmacao = extrair_numeros(afirmacao)
-    numeros_evidencia = extrair_numeros(evidencia)
-
-    if not numeros_afirmacao or not numeros_evidencia:
-        return "inconclusivo"
-
-    if numeros_afirmacao == numeros_evidencia:
-        return "numeros_iguais"
-
-    return "numeros_diferentes"
-
-
-# 3. Encontrar frases com uma palavra-chave
-def encontrar_frases_relevantes(evidencia, palavra_chave):
-
-    frases = re.split(r"[.!?]", evidencia)
-
-    relevantes = []
-
-    for frase in frases:
-
-        if palavra_chave.lower() in frase.lower():
-            relevantes.append(frase.strip())
-
-    return relevantes
-
-
-# 4. Comparar números nas frases relevantes
-def comparar_frases_relevantes(
-    afirmacao,
-    evidencia,
-    palavra_chave
-):
-
-    frases = encontrar_frases_relevantes(
-        evidencia,
-        palavra_chave
-    )
-
-    resultados = []
-
-    for frase in frases:
-
-        resultado = comparar_numeros(
-            afirmacao,
-            frase
-        )
-
-        resultados.append({
-            "frase": frase,
-            "resultado": resultado
-        })
-
-    return resultados
-
-
-# 5. Extrair palavras-chave automaticamente
+# 1. Extrair palavras-chave automaticamente
 def extrair_palavras_chave(afirmacao):
 
     palavras_ignoradas = {
@@ -94,7 +27,7 @@ def extrair_palavras_chave(afirmacao):
     return palavras_chave
 
 
-# 6. Filtrar frases por contexto
+# 2. Filtrar frases por contexto
 
 def filtrar_frases_por_contexto(evidencia, palavras_chave):
 
@@ -122,7 +55,7 @@ def filtrar_frases_por_contexto(evidencia, palavras_chave):
 
     return relevantes
 
-# 7. Extrair número associado a uma palavra
+# 3. Extrair número associado a uma palavra
 def extrair_numero_associado(texto, palavra):
 
     # Aceita números com ponto, como "5.571"
@@ -140,7 +73,7 @@ def extrair_numero_associado(texto, palavra):
     return None
 
 
-# 8. Comparar números pelo contexto
+# 4. Comparar números pelo contexto
 def comparar_numeros_por_contexto(afirmacao, evidencia):
 
     palavras_chave = extrair_palavras_chave(afirmacao)
@@ -171,7 +104,7 @@ def comparar_numeros_por_contexto(afirmacao, evidencia):
     return "inconclusivo"
 
 
-# 9. Classificar a comparação numérica
+# 5. Classificar a comparação numérica
 def classificar_evidencia(resultado_numerico):
 
     if resultado_numerico == "numeros_iguais":
@@ -184,7 +117,7 @@ def classificar_evidencia(resultado_numerico):
         return "inconclusiva"
 
 
-# 10. Comparar a afirmação com as fontes
+# 6. Comparar a afirmação com as fontes
 def comparar_com_fontes(afirmacao, fontes):
 
     resultados = []
@@ -280,7 +213,7 @@ def filtrar_fontes_com_evidencias(resultados):
 
     return fontes_relevantes
 
-# 11. Testar o comparador
+# 7. Testar o comparador
 if __name__ == "__main__":
 
     afirmacao = "O Brasil possui 26 estados."
