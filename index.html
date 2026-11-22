@@ -568,7 +568,7 @@ function calcularScore(evidencias, sensiveis) {
 function gerarResumo(r) {
   const temas = r.sensiveis.join(' e ');
   if (r.status === 'inconclusiva') {
-    let s = 'Não localizamos fontes sobre esta afirmação na base de demonstração. Ausência de evidência não significa que a informação seja falsa: ela apenas não pôde ser confirmada. Procure a fonte original antes de compartilhar.';
+    let s = 'Não localizamos fontes sobre esta afirmação nas fontes consultadas. Ausência de evidência não significa que a informação seja falsa: ela apenas não pôde ser confirmada. Procure a fonte original antes de compartilhar.';
     if (r.sensiveis.length) s += ` Como o tema envolve ${temas}, recomendamos consultar diretamente os canais oficiais.`;
     return s;
   }
@@ -1059,7 +1059,7 @@ function htmlResultado(c, evs, novo) {
       <p>${esc(e.trecho_relevante)}</p>
       <div class="ev-meta"><span class="pos-tag ${e.posicao}"><span aria-hidden="true">${ic}</span>${pos}</span><span>Consultada em ${fmtData(e.data_consulta)}</span><span>${e.contabilizada ? `Impacto: ${e.peso_aplicado > 0 ? '+' : e.peso_aplicado < 0 ? '−' : ''}${Math.abs(e.peso_aplicado)}` : 'Não contabilizada (domínio repetido)'}</span></div>
     </li>`; }).join('')}</ul>`
-    : `<div class="empty" style="padding:20px"><p>Nenhuma fonte foi localizada para esta afirmação na base de demonstração.</p></div>`;
+    : `<div class="empty" style="padding:20px"><p>Nenhuma fonte foi localizada para esta afirmação.</p></div>`;
 
   return `
   <div class="row-between" style="margin-bottom:12px">
@@ -1086,7 +1086,7 @@ function htmlResultado(c, evs, novo) {
     </div>
     <div class="card">
       <h3>Evidências <span class="muted" style="font-family:var(--font);font-weight:500">(${evs.length})</span></h3>
-      <p class="hint" style="margin-top:-4px;margin-bottom:12px">Modo demonstração: os links levam à página inicial de cada fonte; os trechos são resumos da base local.</p>
+      <p class="hint" style="margin-top:-4px;margin-bottom:12px">Evidências da Wikipédia levam ao artigo; as da base de demonstração levam à página inicial da fonte.</p>
       ${evHtml}
     </div>
   </div>
@@ -1428,7 +1428,7 @@ function vSobre() {
   <div class="two" style="margin-top:18px">
     <section class="card"><h2>Limitações deste protótipo</h2><ul>
       <li>Funciona só no navegador: os dados ficam salvos no próprio computador (localStorage), não em um servidor.</li>
-      <li>As verificações usam uma <strong>base de demonstração</strong> com afirmações pré-cadastradas; textos fora dela ficam como inconclusivos.</li>
+      <li>Afirmações fora da <strong>base de demonstração</strong> são verificadas pelo backend em Python, que busca na Wikipédia e compara os números; sem frases parecidas, o resultado fica inconclusivo.</li>
       <li>Senhas são guardadas com hash, mas o isolamento entre usuários aqui é demonstrativo. A versão real precisa de backend (ex.: Python + Supabase com regras de acesso por usuário).</li>
       <li>Nenhum e-mail é enviado: a recuperação de senha usa uma caixa de entrada simulada.</li>
     </ul></section>
@@ -1468,7 +1468,7 @@ function cabecalho(u, caminho) {
       ${u ? `<span class="user-chip"><a href="#/perfil" ${atual === '/perfil' ? 'aria-current="page"' : ''} title="Meu perfil"><span class="avatar" aria-hidden="true">${esc(iniciais)}</span>&nbsp;<span>${esc(u.nome.split(' ')[0])}</span><span class="sr-only"> — meu perfil</span></a><button class="navbtn" id="btn-sair">Sair</button></span>` : ''}
     </nav>
   </div></header>
-  <div class="demo-banner" role="note">Modo demonstração: as verificações usam uma base local de exemplo e os dados ficam salvos só neste navegador.</div>`;
+  <div class="demo-banner" role="note">Modo demonstração: os dados ficam salvos só neste navegador. Afirmações fora da base de exemplo são buscadas na Wikipédia pelo backend em Python.</div>`;
 }
 
 function render() {
