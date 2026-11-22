@@ -376,8 +376,9 @@ function urlDaFonte(f) {
 }
 const urlSegura = u => { try { const x = new URL(u); return x.protocol === 'https:' ? x.href : null; } catch (e) { return null; } };
 
-/* ---------- Motor de verificação (MODO DEMONSTRAÇÃO) ----------
-   Troque Motor.verificar() por uma chamada à API real quando o backend existir. */
+/* ---------- Motor de verificação ----------
+   Primeiro procura na base de demonstração; se não achar, chama o backend em Python. */
+const API_URL = 'http://127.0.0.1:8000'; // backend: uvicorn main:app
 const TEMAS_KW = {
   'Saúde': ['vacina', 'virus', 'doenc', 'cancer', 'remedio', 'medicament', 'saude', ' sus ', 'gripe', 'covid', ' cura', 'tratamento', 'boldo', 'vitamina', 'autismo', 'hospital', 'dieta', ' cha ', 'sintoma', 'digest', 'pandemia', 'resfriado'],
   'Finanças': ['invest', 'poupanca', 'inflacao', 'selic', 'juros', 'banco', 'acoes', 'bolsa de valores', 'cripto', 'bitcoin', 'dinheiro', 'imposto', ' pix', 'ipca', 'lucro', 'rendimento', 'copom', ' renda'],
@@ -499,9 +500,29 @@ const Motor = {
   },
 
   async verificar(texto, manual) {
-    await sleep(1300 + Math.random() * 700); // simula a busca nas fontes
     if (DB.data.config.simularFalha) { const e = new Error('Serviço de fontes indisponível'); e.codigo = 'INDISPONIVEL'; throw e; }
-    return this.analisar(texto, manual, agoraISO());
+    const agora = agoraISO();
+    const r = this.analisar(texto, manual, agora);
+    if (r.evidencias.length) return r; // afirmação já conhecida na base de demonstração
+
+    // Senão, o backend em Python busca na Wikipédia
+    const wiki = DB.data.fontes_confiaveis.find(f => f.dominio === 'pt.wikipedia.org' && f.ativa);
+    if (!wiki) return r;
+    let dados;
+    try {
+      const resp = await fetch(API_URL + '/verificar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ texto }) });
+      if (!resp.ok) throw new Error('Resposta ' + resp.status);
+      dados = await resp.json();
+    } catch (e) {
+      const erro = new Error('Serviço de fontes indisponível'); erro.codigo = 'INDISPONIVEL'; throw erro;
+    }
+    const evidencias = [];
+    for (const a of dados.afirmacoes) {
+      for (const e of a.evidencias) {
+        evidencias.push({ fonte_nome: 'Wikipédia — ' + e.titulo, dominio: wiki.dominio, url: e.url, tipo_fonte: wiki.tipo, peso: wiki.peso, posicao: e.posicao, trecho_relevante: e.trecho, data_consulta: agora });
+      }
+    }
+    return { ...r, ...calcularScore(evidencias, r.sensiveis), evidencias };
   }
 };
 
