@@ -4,11 +4,6 @@ from buscador import buscar_fontes
 from comparador import (
     comparar_com_fontes,
     resumir_evidencias,
-    determinar_resultado_geral
-)
-from comparador import (
-    comparar_com_fontes,
-    resumir_evidencias,
     determinar_resultado_geral,
     filtrar_fontes_com_evidencias
 )
