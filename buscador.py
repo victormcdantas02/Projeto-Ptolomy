@@ -37,6 +37,10 @@ def preparar_termo_busca(afirmacao):
 # PASSO 2 - Pesquisar artigos na Wikipédia
 def pesquisar_wikipedia(termo):
 
+    # Sem palavras-chave não tem o que buscar
+    if not termo:
+        return []
+
     parametros = {
         "action": "query",
         "list": "search",
