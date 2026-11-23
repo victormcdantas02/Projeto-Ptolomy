@@ -631,9 +631,9 @@ async function criarDadosDemo() {
   DB.salvar();
 }
 
-function salvarChecagem(usuarioId, r, dataISO, idFixo) {
+function salvarChecagem(usuarioId, r, dataISO, idFixo, iaOrigem) {
   const id = idFixo || uid('chk');
-  const c = { id, usuario_id: usuarioId, texto: r.texto, score: r.score, score_bruto: r.score_bruto, cor: r.cor, tema: r.temas[0], temas: r.temas,
+  const c = { id, usuario_id: usuarioId, texto: r.texto, ia_origem: iaOrigem || 'Não informada', score: r.score, score_bruto: r.score_bruto, cor: r.cor, tema: r.temas[0], temas: r.temas,
     tema_sensivel: r.sensiveis.length > 0, sensiveis: r.sensiveis, classificacao_confianca: r.confianca, resumo: r.resumo, fatores: r.fatores,
     controversia: r.controversia, bloqueado: r.bloqueado, requisito_ok: r.requisito_ok, oficiais_confirmando: r.oficiais_confirmando,
     status: r.status, modo: 'demonstração', data: dataISO, created_at: dataISO, updated_at: dataISO };
@@ -933,6 +933,11 @@ function vChecar() {
         <div class="row-between"><div class="hint" id="c-hint">Mínimo de 15 caracteres, máximo de 2.000.</div><div class="hint" id="c-cont">0 / 2000</div></div>
         <div class="err" id="c-texto-err"></div>
         <div class="field" style="margin-top:14px">
+          <label for="c-ia">Qual IA gerou o texto?</label>
+          <select id="c-ia" aria-describedby="c-ia-err"><option value="">Selecione</option><option>ChatGPT</option><option>Gemini</option><option>Claude</option><option>Copilot</option><option>DeepSeek</option><option>Outra</option></select>
+          <div class="err" id="c-ia-err"></div>
+        </div>
+        <div class="field">
           <label for="c-tema">Tema sensível (opcional)</label>
           <select id="c-tema" aria-describedby="c-tema-hint"><option value="">Detectar automaticamente</option><option>Saúde</option><option>Finanças</option><option>Eleições</option></select>
           <div class="hint" id="c-tema-hint">Indicar um tema só deixa a regra mais rigorosa; nunca remove o que foi detectado automaticamente.</div>
@@ -977,6 +982,7 @@ function vChecar() {
       e.preventDefault();
       const t = ta.value.trim();
       if (!setErro('c-texto', !t ? 'Digite ou cole um texto para verificar.' : t.length < 15 ? `Texto muito curto (${t.length} caracteres). Use pelo menos 15 para termos contexto.` : '')) { ta.focus(); return; }
+      if (!setErro('c-ia', !$('#c-ia').value ? 'Informe qual IA gerou o texto.' : '')) { $('#c-ia').focus(); return; }
       $('#rev-texto').textContent = t;
       const manual = $('#c-tema').value;
       const cls = Motor.classificar(t, manual);
@@ -989,7 +995,7 @@ function vChecar() {
 
     async function executar(forcar = false) {
       const u = usuarioAtual(); if (!u) { ir('#/login'); return; }
-      const texto = ta.value.trim(), manual = $('#c-tema').value;
+      const texto = ta.value.trim(), manual = $('#c-tema').value, ia = $('#c-ia').value;
       const saida = $('#saida');
       const nt = normalizar(texto).replace(/\s+/g, ' ');
       const minhas = DB.data.checagens.filter(c => c.usuario_id === u.id);
@@ -1013,7 +1019,7 @@ function vChecar() {
       try {
         const r = await Motor.verificar(texto, manual);
         if (minhaExec !== execucaoAtual) return; // ignora resposta antiga
-        const c = salvarChecagem(u.id, r, agoraISO());
+        const c = salvarChecagem(u.id, r, agoraISO(), null, ia);
         DB.salvar();
         etapa(4);
         saida.innerHTML = htmlResultado(c, DB.data.evidencias.filter(e => e.checagem_id === c.id), true);
@@ -1063,7 +1069,7 @@ function htmlResultado(c, evs, novo) {
 
   return `
   <div class="row-between" style="margin-bottom:12px">
-    <div><h2 id="res-t" tabindex="-1">Resultado da checagem</h2><p class="hint" style="margin:0">Gerado em ${fmtDataHora(c.data)} · Modo demonstração${novo ? ' · Salvo automaticamente no histórico' : ''}</p></div>
+    <div><h2 id="res-t" tabindex="-1">Resultado da checagem</h2><p class="hint" style="margin:0">Gerado em ${fmtDataHora(c.data)} · Texto gerado por ${esc(c.ia_origem || 'IA não informada')}${novo ? ' · Salvo automaticamente no histórico' : ''}</p></div>
   </div>
   <div class="result">
     <div class="stack">
