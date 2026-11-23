@@ -11,6 +11,7 @@ venv/
 
 # Banco de dados local (cada um tem o seu)
 ptolomy.db
+teste_analises.db
 
 # Configurações locais
 .vscode/
