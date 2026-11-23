@@ -1156,6 +1156,7 @@ function vHistorico() {
 }
 
 /* ----- Detalhe de uma checagem ----- */
+const STATUS_VALIDACAO = ['não verificado', 'confirmado', 'falso'];
 function vDetalhe(id) {
   const u = usuarioAtual();
   const c = DB.data.checagens.find(x => x.id === id);
@@ -1165,8 +1166,28 @@ function vDetalhe(id) {
     return vMensagem('Acesso negado', 'Você não tem permissão para ver esta checagem. Cada usuário acessa apenas as próprias checagens.', '<a class="btn btn-primary" href="#/historico">Ir para o meu histórico</a>', '🔒');
   }
   const evs = DB.data.evidencias.filter(e => e.checagem_id === c.id);
-  return { titulo: 'Detalhe da checagem', html: `<p class="small"><a href="#/historico">‹ Voltar ao histórico</a></p><h1 tabindex="-1" class="sr-only">Detalhe da checagem</h1>${htmlResultado(c, evs, false)}<p class="hint">Este é o resultado registrado na data da checagem; ele não é recalculado ao ser aberto.</p>`,
-    montar(m) { ligarResultado(m); } };
+  return { titulo: 'Detalhe da checagem', html: `<p class="small"><a href="#/historico">‹ Voltar ao histórico</a></p><h1 tabindex="-1" class="sr-only">Detalhe da checagem</h1>${htmlResultado(c, evs, false)}
+  <section class="card" style="margin-top:18px" aria-labelledby="val-t">
+    <h2 id="val-t">Validação</h2>
+    <form id="f-validacao" novalidate>
+      <div class="field"><label for="v-status">Status da validação</label><select id="v-status">${STATUS_VALIDACAO.map(s => `<option ${s === c.status_validacao ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
+      <div class="field"><label for="v-obs">Observação</label><textarea id="v-obs" maxlength="500" style="min-height:80px">${esc(c.observacao)}</textarea></div>
+      <button class="btn btn-primary" type="submit">Salvar validação</button>
+    </form>
+  </section>
+  <p class="hint">Este é o resultado registrado na data da checagem; ele não é recalculado ao ser aberto.</p>`,
+    montar(m) {
+      ligarResultado(m);
+      // UPDATE: manda o novo status e a observação para o backend
+      $('#f-validacao', m).onsubmit = async e => {
+        e.preventDefault();
+        try {
+          const a = await api('/analises/' + c.id, { method: 'PUT', body: JSON.stringify({ status_validacao: $('#v-status').value, observacao: $('#v-obs').value.trim() }) });
+          c.status_validacao = a.status_validacao; c.observacao = a.observacao;
+          toast('Validação salva.', 'ok');
+        } catch (err) { toast('Não foi possível salvar a validação.', 'erro'); }
+      };
+    } };
 }
 
 function vMensagem(titulo, texto, acao = '', icone = '') {
