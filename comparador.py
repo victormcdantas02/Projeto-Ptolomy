@@ -1,7 +1,4 @@
 
-import re
-
-
 # Separa um texto em frases, olhando letra por letra.
 # Corta depois de . ! ? mas não no ponto de números como "5.571"
 def separar_frases(texto):
@@ -102,17 +99,16 @@ def filtrar_frases_por_contexto(evidencia, palavras_chave):
 # 3. Extrair número associado a uma palavra
 def extrair_numero_associado(texto, palavra):
 
-    # Aceita números com ponto, como "5.571"
-    padrao = rf"(\d[\d.]*)\s+{re.escape(palavra)}\b"
+    palavras = separar_palavras(texto)
 
-    resultado = re.search(
-        padrao,
-        texto,
-        re.IGNORECASE
-    )
+    # Procura a palavra e olha a palavra que vem logo antes dela
+    for i in range(1, len(palavras)):
 
-    if resultado:
-        return int(resultado.group(1).replace(".", ""))
+        # Tira o ponto de números como "5.571"
+        anterior = palavras[i - 1].replace(".", "")
+
+        if palavras[i] == palavra and anterior.isdigit():
+            return int(anterior)
 
     return None
 
