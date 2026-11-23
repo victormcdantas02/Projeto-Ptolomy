@@ -7,11 +7,17 @@ from comparador import (
     filtrar_fontes_com_evidencias
 )
 
-# Resultado da comparação -> posição que o site mostra
-POSICOES = {
-    "compatibilidade_numerica": "confirma",
-    "divergencia_numerica": "contradiz"
-}
+# Traduz o resultado da comparação para a posição que o site mostra
+def definir_posicao(resultado):
+
+    if resultado == "compatibilidade_numerica":
+        return "confirma"
+
+    elif resultado == "divergencia_numerica":
+        return "contradiz"
+
+    else:
+        return "neutra"
 
 
 def montar_evidencias(fontes_relevantes):
@@ -27,7 +33,7 @@ def montar_evidencias(fontes_relevantes):
         evidencias.append({
             "titulo": fonte["titulo"],
             "url": fonte["url"],
-            "posicao": POSICOES.get(resultado, "neutra"),
+            "posicao": definir_posicao(resultado),
             "trecho": fonte["comparacoes"][0]["frase"]
         })
 
