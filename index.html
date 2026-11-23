@@ -600,7 +600,7 @@ function renovarSessao() {
 
 /* ---------- Dados de demonstração ---------- */
 async function criarDadosDemo() {
-  DB.data = { versao: 1, usuarios: [], checagens: [], evidencias: [], auditoria: [], resets: [], tentativas: {}, config: { simularFalha: false },
+  DB.data = { versao: 1, usuarios: [], checagens: [], evidencias: [], auditoria: [], tentativas: {}, config: { simularFalha: false },
     fontes_confiaveis: FONTES_PADRAO.map(([nome, dominio, tipo, obs, ficticia], i) => ({ id: 'fnt-' + (i + 1), nome, dominio, tipo, peso: PESO_PADRAO[tipo], ativa: true, observacao: obs || '', ficticia: !!ficticia, data_atualizacao: agoraISO() })) };
   const usuarios = [['usr-admin', 'Admin Ptolomy', 'admin@ptolomy.demo', 'admin', 40], ['usr-aluno', 'Aluno Demonstração', 'aluno@ptolomy.demo', 'comum', 35], ['usr-maria', 'Maria Demonstração', 'maria@ptolomy.demo', 'comum', 30]];
   for (const [id, nome, email, tipo, d] of usuarios) {
@@ -747,7 +747,7 @@ function vLogin() {
         ${campo({ id: 'l-senha', label: 'Senha', type: 'password', auto: 'current-password' })}
         <button class="btn btn-primary w100" type="submit">Entrar</button>
       </form>
-      <p class="small" style="margin-top:14px"><a href="#/esqueci">Esqueci minha senha</a> · <a href="#/cadastro">Criar uma conta</a></p>
+      <p class="small" style="margin-top:14px"><a href="#/cadastro">Criar uma conta</a></p>
       <div class="demo-cred">
         <strong>Contas de demonstração (temporárias)</strong><br>
         Senha de todas: <code>${SENHA_DEMO}</code>
@@ -821,7 +821,7 @@ function vCadastro() {
       ok = setErro('c-senha2', !s2 ? 'Confirme a senha.' : s1 !== s2 ? 'As senhas não são iguais.' : '') && ok;
       if (!ok) { msgForm(msg, ''); $('[aria-invalid=true]', f).focus(); return; }
       if (DB.data.usuarios.some(u => u.email === email)) {
-        msgForm(msg, 'danger', 'Não foi possível concluir o cadastro com este e-mail. Se você já tem conta, <a href="#/login">entre</a> ou <a href="#/esqueci">recupere a senha</a>.');
+        msgForm(msg, 'danger', 'Não foi possível concluir o cadastro com este e-mail. Se você já tem conta, <a href="#/login">entre</a>.');
         return;
       }
       const btn = $('button[type=submit]', f); btn.disabled = true; btn.textContent = 'Criando conta…';
@@ -831,79 +831,6 @@ function vCadastro() {
       iniciarSessao(u);
       toast('Conta criada com sucesso. Bem-vindo(a)!', 'ok');
       ir('#/checar');
-    };
-  } };
-}
-
-/* ----- Esqueci a senha ----- */
-function vEsqueci() {
-  return { titulo: 'Recuperar senha', html: `
-  <div style="max-width:520px;margin:0 auto">
-    <h1 tabindex="-1">Recuperar senha</h1>
-    <p class="lead">Informe o e-mail da sua conta. Enviaremos um código para criar uma nova senha.</p>
-    <section class="card">
-      <form id="f-esq" novalidate>
-        <div id="esq-msg" class="form-msg"></div>
-        ${campo({ id: 'e-email', label: 'E-mail', type: 'email', auto: 'email' })}
-        <button class="btn btn-primary w100" type="submit">Enviar código</button>
-      </form>
-      <div id="caixa-demo"></div>
-      <p class="small" style="margin-top:14px"><a href="#/login">Voltar para o login</a> · <a href="#/redefinir">Já tenho um código</a></p>
-    </section>
-  </div>`,
-  montar(m) {
-    $('#f-esq', m).onsubmit = e => {
-      e.preventDefault();
-      const email = normEmail($('#e-email').value);
-      if (!setErro('e-email', !emailValido(email) ? 'Digite um e-mail válido.' : '')) { $('#e-email').focus(); return; }
-      const u = DB.data.usuarios.find(x => x.email === email);
-      let codigo = null;
-      if (u) {
-        codigo = Array.from(crypto.getRandomValues(new Uint8Array(6)), b => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[b % 32]).join('');
-        DB.data.resets = DB.data.resets.filter(r => r.usuario_id !== u.id);
-        DB.data.resets.push({ usuario_id: u.id, codigo, expira: Date.now() + 15 * 60000, usado: false });
-        DB.salvar();
-      }
-      msgForm($('#esq-msg'), 'ok', 'Se houver uma conta com este e-mail, enviamos as instruções para redefinir a senha.');
-      $('#caixa-demo').innerHTML = `<div class="demo-cred" style="margin-top:16px"><strong>Caixa de entrada simulada</strong> <span class="muted">(modo demonstração — nenhum e-mail real é enviado)</span><br>${codigo ? `Seu código de redefinição é <code>${codigo}</code>, válido por 15 minutos. <a href="#/redefinir">Redefinir senha agora</a>.` : 'Nenhuma mensagem para este endereço.'}</div>`;
-    };
-  } };
-}
-
-/* ----- Redefinir senha ----- */
-function vRedefinir() {
-  return { titulo: 'Redefinir senha', html: `
-  <div style="max-width:520px;margin:0 auto">
-    <h1 tabindex="-1">Criar nova senha</h1>
-    <p class="lead">Use o código recebido. Ele vale por 15 minutos e só pode ser usado uma vez.</p>
-    <section class="card">
-      <form id="f-red" novalidate>
-        <div id="red-msg" class="form-msg"></div>
-        ${campo({ id: 'r-email', label: 'E-mail', type: 'email', auto: 'email' })}
-        ${campo({ id: 'r-cod', label: 'Código de redefinição', auto: 'one-time-code', attrs: 'maxlength="6" style="text-transform:uppercase;letter-spacing:.2em"' })}
-        ${campo({ id: 'r-senha', label: 'Nova senha', type: 'password', auto: 'new-password', hint: 'Mínimo de 8 caracteres, com letras e números.' })}
-        ${campo({ id: 'r-senha2', label: 'Confirmar nova senha', type: 'password', auto: 'new-password' })}
-        <button class="btn btn-primary w100" type="submit">Salvar nova senha</button>
-      </form>
-      <p class="small" style="margin-top:14px"><a href="#/esqueci">Pedir outro código</a> · <a href="#/login">Voltar para o login</a></p>
-    </section>
-  </div>`,
-  montar(m) {
-    $('#f-red', m).onsubmit = async e => {
-      e.preventDefault();
-      const email = normEmail($('#r-email').value), cod = $('#r-cod').value.trim().toUpperCase(), s1 = $('#r-senha').value, s2 = $('#r-senha2').value;
-      let ok = setErro('r-email', !emailValido(email) ? 'Digite um e-mail válido.' : '');
-      ok = setErro('r-cod', cod.length !== 6 ? 'O código tem 6 caracteres.' : '') && ok;
-      ok = setErro('r-senha', !senhaForte(s1) ? 'A senha precisa ter 8 caracteres ou mais, com letras e números.' : '') && ok;
-      ok = setErro('r-senha2', s1 !== s2 ? 'As senhas não são iguais.' : '') && ok;
-      if (!ok) { $('[aria-invalid=true]').focus(); return; }
-      const u = DB.data.usuarios.find(x => x.email === email);
-      const r = u && DB.data.resets.find(x => x.usuario_id === u.id && x.codigo === cod && !x.usado);
-      if (!r || r.expira < Date.now()) { msgForm($('#red-msg'), 'danger', 'Código inválido ou expirado. <a href="#/esqueci">Solicite um novo código</a>.'); return; }
-      u.sal = uid('sal'); u.senha_hash = await hashSenha(s1, u.sal); u.data_atualizacao = agoraISO();
-      r.usado = true; DB.auditar('Senha redefinida', 'Redefinição por código'); DB.salvar();
-      toast('Senha alterada. Entre com a nova senha.', 'ok');
-      ir('#/login');
     };
   } };
 }
@@ -1479,7 +1406,6 @@ function vSobre() {
       <li>Funciona só no navegador: os dados ficam salvos no próprio computador (localStorage), não em um servidor.</li>
       <li>Afirmações fora da <strong>base de demonstração</strong> são verificadas pelo backend em Python, que busca na Wikipédia e compara os números; sem frases parecidas, o resultado fica inconclusivo.</li>
       <li>Senhas são guardadas com hash, mas o isolamento entre usuários aqui é demonstrativo. A versão real precisa de backend (ex.: Python + Supabase com regras de acesso por usuário).</li>
-      <li>Nenhum e-mail é enviado: a recuperação de senha usa uma caixa de entrada simulada.</li>
     </ul></section>
     <section class="card"><h2>Equipe</h2><ul><li>Integrante 1</li><li>Integrante 2</li><li>Integrante 3</li><li>Integrante 4</li></ul><p class="hint">Edite esta lista com os nomes da equipe.</p></section>
   </div>` };
@@ -1491,8 +1417,6 @@ function vSobre() {
 const ROTAS = [
   { rx: /^\/login$/, view: vLogin, publica: true, soVisitante: true },
   { rx: /^\/cadastro$/, view: vCadastro, publica: true, soVisitante: true },
-  { rx: /^\/esqueci$/, view: vEsqueci, publica: true, soVisitante: true },
-  { rx: /^\/redefinir$/, view: vRedefinir, publica: true, soVisitante: true },
   { rx: /^\/sobre$/, view: vSobre, publica: true },
   { rx: /^\/checar$/, view: vChecar },
   { rx: /^\/historico$/, view: vHistorico },
