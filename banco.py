@@ -122,7 +122,13 @@ def listar_analises(usuario_id=None):
 
     conexao.close()
 
-    return [linha_para_dict(linha) for linha in linhas]
+    # fetchall devolve uma lista de tuplas (uma "matriz": linhas x colunas)
+    analises = []
+
+    for linha in linhas:
+        analises.append(linha_para_dict(linha))
+
+    return analises
 
 
 # UPDATE - muda o status da validação e a observação
