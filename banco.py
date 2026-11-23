@@ -131,3 +131,19 @@ def atualizar_analise(analise_id, status_validacao, observacao):
     conexao.close()
 
     return cursor.rowcount > 0
+
+
+# DELETE - remove uma análise (devolve False se ela não existir)
+def excluir_analise(analise_id):
+
+    conexao = conectar()
+
+    cursor = conexao.execute(
+        "DELETE FROM analises WHERE id = ?",
+        (analise_id,)
+    )
+
+    conexao.commit()
+    conexao.close()
+
+    return cursor.rowcount > 0

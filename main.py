@@ -9,7 +9,8 @@ from banco import (
     salvar_analise,
     buscar_analise,
     listar_analises,
-    atualizar_analise
+    atualizar_analise,
+    excluir_analise
 )
 
 app = FastAPI()
@@ -100,3 +101,9 @@ def editar(analise_id: int, dados: EdicaoAnalise):
         raise HTTPException(status_code=404, detail="Análise não encontrada")
 
     return buscar_analise(analise_id)
+
+@app.delete("/analises/{analise_id}", status_code=204)
+def excluir(analise_id: int):
+
+    if not excluir_analise(analise_id):
+        raise HTTPException(status_code=404, detail="Análise não encontrada")
