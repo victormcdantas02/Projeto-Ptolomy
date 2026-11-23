@@ -3,7 +3,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from verificador import analisar_texto
-from banco import criar_tabela, salvar_analise, buscar_analise
+from banco import criar_tabela, salvar_analise, buscar_analise, listar_analises
 
 app = FastAPI()
 
@@ -61,3 +61,7 @@ def cadastrar_analise(dados: NovaAnalise):
     )
 
     return buscar_analise(novo_id)
+
+@app.get("/analises")
+def listar(usuario_id: str = ""):
+    return listar_analises(usuario_id)

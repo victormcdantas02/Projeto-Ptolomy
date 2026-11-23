@@ -90,3 +90,24 @@ def buscar_analise(analise_id):
         return None
 
     return linha_para_dict(linha)
+
+
+# READ - lista as análises, da mais nova para a mais antiga
+# (se vier usuario_id, mostra só as daquele usuário)
+def listar_analises(usuario_id=None):
+
+    conexao = conectar()
+
+    if usuario_id:
+        linhas = conexao.execute(
+            "SELECT * FROM analises WHERE usuario_id = ? ORDER BY id DESC",
+            (usuario_id,)
+        ).fetchall()
+    else:
+        linhas = conexao.execute(
+            "SELECT * FROM analises ORDER BY id DESC"
+        ).fetchall()
+
+    conexao.close()
+
+    return [linha_para_dict(linha) for linha in linhas]
