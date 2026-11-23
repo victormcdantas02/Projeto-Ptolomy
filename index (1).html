@@ -929,9 +929,9 @@ function vChecar() {
       <h2 id="form-t" class="sr-only">Texto para verificar</h2>
       <form id="f-check" novalidate>
         <label for="c-texto">Afirmação ou resposta de IA</label>
-        <textarea id="c-texto" maxlength="2000" aria-describedby="c-hint c-err" placeholder="Ex.: As urnas eletrônicas passam por testes públicos de segurança."></textarea>
+        <textarea id="c-texto" maxlength="2000" aria-describedby="c-hint c-texto-err" placeholder="Ex.: As urnas eletrônicas passam por testes públicos de segurança."></textarea>
         <div class="row-between"><div class="hint" id="c-hint">Mínimo de 15 caracteres, máximo de 2.000.</div><div class="hint" id="c-cont">0 / 2000</div></div>
-        <div class="err" id="c-err"></div>
+        <div class="err" id="c-texto-err"></div>
         <div class="field" style="margin-top:14px">
           <label for="c-tema">Tema sensível (opcional)</label>
           <select id="c-tema" aria-describedby="c-tema-hint"><option value="">Detectar automaticamente</option><option>Saúde</option><option>Finanças</option><option>Eleições</option></select>
