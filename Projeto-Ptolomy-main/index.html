@@ -334,7 +334,8 @@ const senhaForte = s => s.length >= 8 && /[A-Za-z]/.test(s) && /\d/.test(s);
 const DB = {
   data: null,
   carregar() { try { this.data = JSON.parse(localStorage.getItem(KEY_DB)); } catch (e) { this.data = null; } return this.data; },
-  salvar() { try { localStorage.setItem(KEY_DB, JSON.stringify(this.data)); } catch (e) { toast('Não foi possível salvar neste navegador (armazenamento bloqueado). Os dados ficam só nesta aba.', 'erro'); } },
+  // As checagens ficam no banco (backend); o navegador guarda só usuários, fontes e configurações
+  salvar() { try { localStorage.setItem(KEY_DB, JSON.stringify({ ...this.data, checagens: [], evidencias: [] })); } catch (e) { toast('Não foi possível salvar neste navegador (armazenamento bloqueado). Os dados ficam só nesta aba.', 'erro'); } },
   auditar(acao, detalhe) {
     const u = usuarioAtual();
     this.data.auditoria.unshift({ id: uid('aud'), data: agoraISO(), usuario: u ? u.email : 'sistema', acao, detalhe });
@@ -640,6 +641,31 @@ function salvarChecagem(usuarioId, r, dataISO, idFixo, iaOrigem) {
   DB.data.checagens.push(c);
   r.evidencias.forEach(e => DB.data.evidencias.push({ id: uid('evd'), checagem_id: id, fonte_nome: e.fonte_nome, dominio: e.dominio, url: e.url, url_canonica: e.url, tipo_fonte: e.tipo_fonte, posicao: e.posicao, trecho_relevante: e.trecho_relevante, data_consulta: e.data_consulta, peso_aplicado: e.peso_aplicado, contabilizada: e.contabilizada }));
   return c;
+}
+
+/* ---------- Análises no banco (backend em Python) ---------- */
+async function api(caminho, opcoes = {}) {
+  const resp = await fetch(API_URL + caminho, { headers: { 'Content-Type': 'application/json' }, ...opcoes });
+  if (!resp.ok) throw new Error('Erro ' + resp.status);
+  return resp.status === 204 ? null : resp.json();
+}
+
+// Converte a análise que vem do banco no formato que as telas usam
+function analiseParaChecagem(a) {
+  const c = { ...a.resultado, id: String(a.id), usuario_id: a.usuario_id, texto: a.texto, ia_origem: a.ia_origem,
+    status_validacao: a.status_validacao, observacao: a.observacao, data: a.data };
+  const evs = a.fontes.map(e => ({ ...e, checagem_id: c.id }));
+  return [c, evs];
+}
+
+async function carregarAnalises() {
+  DB.data.checagens = []; DB.data.evidencias = [];
+  const lista = await api('/analises');
+  for (const a of lista) {
+    const [c, evs] = analiseParaChecagem(a);
+    DB.data.checagens.push(c);
+    DB.data.evidencias.push(...evs);
+  }
 }
 
 /* ---------- Elementos visuais reutilizáveis ---------- */
@@ -1516,6 +1542,8 @@ async function iniciar() {
     DB.data.fontes_confiaveis.push({ id: uid('fnt'), nome: 'Wikipédia', dominio: 'pt.wikipedia.org', tipo: 'outra', peso: PESO_PADRAO.outra, ativa: true, observacao: 'Usada pelo backend em Python na busca automática.', ficticia: false, data_atualizacao: agoraISO() });
     DB.salvar();
   }
+  try { await carregarAnalises(); }
+  catch (e) { toast('Não foi possível carregar o histórico. Verifique se o backend está rodando.', 'erro'); }
   window.addEventListener('hashchange', render);
   ['click', 'keydown'].forEach(ev => document.addEventListener(ev, renovarSessao, { passive: true }));
   setInterval(() => { if (lerSessao() && !usuarioAtual()) render(); }, 60000); // detecta sessão expirada
