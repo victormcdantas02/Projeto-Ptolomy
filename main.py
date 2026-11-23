@@ -26,9 +26,10 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-class TextoIA(BaseModel):
-    # Texto muito curto não dá contexto para buscar
-    texto: str = Field(min_length=15, max_length=2000)
+# Confere o tamanho do texto: muito curto não dá contexto para buscar
+def validar_texto(texto):
+    if len(texto) < 15 or len(texto) > 2000:
+        raise HTTPException(status_code=422, detail="O texto precisa ter entre 15 e 2000 caracteres")
 
 # Dados que o site manda para salvar uma análise
 class NovaAnalise(BaseModel):
@@ -48,9 +49,11 @@ def inicio():
     return {"mensagem": "API funcionando!"}
 
 @app.post("/verificar")
-def verificar(dados: TextoIA):
+def verificar(dados: dict):
 
-    texto_recebido = dados.texto
+    # O site manda um JSON como {"texto": "..."}, que chega como dicionário
+    texto_recebido = str(dados.get("texto", ""))
+    validar_texto(texto_recebido)
 
     try:
         resultado = analisar_texto(texto_recebido)
