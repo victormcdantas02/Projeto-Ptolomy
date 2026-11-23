@@ -24,3 +24,9 @@ def test_numeros_iguais():
 def test_numeros_diferentes():
     resultado = comparar_numeros_por_contexto("O Brasil possui 30 estados.", "O Brasil possui 26 estados")
     assert resultado == "numeros_diferentes"
+
+
+def test_numero_com_expoente_nao_quebra():
+    # "10²" parece número, mas o int() não converte o "²"
+    numero = extrair_numero_associado("A área tem 10² metros", "metros")
+    assert numero is None

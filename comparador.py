@@ -107,7 +107,7 @@ def extrair_numero_associado(texto, palavra):
         # Tira o ponto de números como "5.571"
         anterior = palavras[i - 1].replace(".", "")
 
-        if palavras[i] == palavra and anterior.isdigit():
+        if palavras[i] == palavra and anterior.isdecimal():
             return int(anterior)
 
     return None
