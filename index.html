@@ -52,7 +52,6 @@ nav.main a:hover,nav.main button.navbtn:hover{color:#fff;background:rgba(255,255
   nav.main.open{display:flex}
   .user-chip{margin:8px 0 0;padding:12px 0 0;border-left:0;border-top:1px solid rgba(255,255,255,.18)}
 }
-.demo-banner{background:var(--gold-soft);color:#5a4500;font-size:.85rem;text-align:center;padding:6px 16px;border-bottom:1px solid #ead9a0}
 
 main{max-width:1180px;width:100%;margin:0 auto;padding:28px 16px 64px;flex:1}
 h1,h2,h3{font-family:var(--serif);color:var(--navy);line-height:1.2;margin:0 0 .45em}
@@ -104,8 +103,6 @@ input[type=checkbox]{width:auto;min-height:auto;accent-color:var(--navy)}
 .ticks{list-style:none;padding:0;margin:0}
 .ticks li{padding-left:28px;position:relative;margin-bottom:8px}
 .ticks li::before{content:"✓";position:absolute;left:0;top:0;width:20px;height:20px;border-radius:50%;background:var(--navy);color:var(--gold-2);font-size:.75rem;display:flex;align-items:center;justify-content:center;font-weight:700;margin-top:2px}
-.demo-cred{margin-top:18px;background:#f3f5fa;border:1px dashed #b9c4dc;border-radius:12px;padding:12px 14px;font-size:.88rem}
-.demo-cred code{background:#fff;padding:1px 6px;border-radius:6px;border:1px solid #dde3ef}
 
 /* Badges, pills, alertas */
 .badge{display:inline-flex;align-items:center;gap:6px;font-size:.78rem;font-weight:600;padding:3px 10px;border-radius:999px;background:#eef1f7;color:var(--navy-2);border:1px solid #dde3ef;white-space:nowrap}
@@ -286,7 +283,8 @@ dl.info dd{margin:0;overflow-wrap:anywhere}
 const KEY_DB = 'ptolomy_db_v1';
 const KEY_SESS = 'ptolomy_sessao_v1';
 const SESSAO_MIN = 60;               // sessão expira após 60 min sem uso
-const SENHA_DEMO = 'Demo@2026';
+const SENHA_INICIAL = 'Ptolomy@2026';
+const SENHA_ANTIGA = 'Demo@2026'; // senha das contas criadas antes; trocada sozinha na inicialização
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -366,7 +364,7 @@ const FONTES_PADRAO = [
   ['Aos Fatos', 'aosfatos.org', 'imprensa'],
   ['g1 — Fato ou Fake', 'g1.globo.com', 'imprensa'],
   ['Wikipédia', 'pt.wikipedia.org', 'outra', 'Usada pelo backend em Python na busca automática.'],
-  ['Blog pessoal (exemplo)', 'exemplo-blog.com', 'outra', 'Fonte fictícia, usada só para demonstrar fontes não confiáveis.', true],
+  ['Blog pessoal (exemplo)', 'exemplo-blog.com', 'outra', 'Fonte fictícia, usada como exemplo de fonte não confiável.', true],
 ];
 
 function urlDaFonte(f) {
@@ -598,16 +596,16 @@ function renovarSessao() {
   const u = usuarioAtual(); if (u) { iniciarSessao(u); ultimaRenovacao = Date.now(); }
 }
 
-/* ---------- Dados de demonstração ---------- */
-async function criarDadosDemo() {
+/* ---------- Dados iniciais ---------- */
+async function criarDadosIniciais() {
   DB.data = { versao: 1, usuarios: [], checagens: [], evidencias: [], auditoria: [], tentativas: {}, config: { simularFalha: false },
     fontes_confiaveis: FONTES_PADRAO.map(([nome, dominio, tipo, obs, ficticia], i) => ({ id: 'fnt-' + (i + 1), nome, dominio, tipo, peso: PESO_PADRAO[tipo], ativa: true, observacao: obs || '', ficticia: !!ficticia, data_atualizacao: agoraISO() })) };
-  const usuarios = [['usr-admin', 'Admin Ptolomy', 'admin@ptolomy.demo', 'admin', 40], ['usr-aluno', 'Aluno Demonstração', 'aluno@ptolomy.demo', 'comum', 35], ['usr-maria', 'Maria Demonstração', 'maria@ptolomy.demo', 'comum', 30]];
+  const usuarios = [['usr-admin', 'Admin Ptolomy', 'admin@ptolomy.ai', 'admin', 40], ['usr-aluno', 'Aluno Ptolomy', 'aluno@ptolomy.ai', 'comum', 35], ['usr-maria', 'Maria Souza', 'maria@ptolomy.ai', 'comum', 30]];
   for (const [id, nome, email, tipo, d] of usuarios) {
     const sal = uid('sal');
-    DB.data.usuarios.push({ id, nome, email, senha_hash: await hashSenha(SENHA_DEMO, sal), sal, data_cadastro: diasAtrasISO(d), data_atualizacao: diasAtrasISO(d), tipo, email_verificado: true, demo: true });
+    DB.data.usuarios.push({ id, nome, email, senha_hash: await hashSenha(SENHA_INICIAL, sal), sal, data_cadastro: diasAtrasISO(d), data_atualizacao: diasAtrasISO(d), tipo, email_verificado: true });
   }
-  DB.data.auditoria.push({ id: uid('aud'), data: agoraISO(), usuario: 'sistema', acao: 'Dados de demonstração criados', detalhe: '3 usuários de exemplo (as checagens ficam no banco)' });
+  DB.data.auditoria.push({ id: uid('aud'), data: agoraISO(), usuario: 'sistema', acao: 'Dados iniciais criados', detalhe: '3 usuários iniciais (as checagens ficam no banco)' });
   DB.salvar();
 }
 
@@ -748,18 +746,10 @@ function vLogin() {
         <button class="btn btn-primary w100" type="submit">Entrar</button>
       </form>
       <p class="small" style="margin-top:14px"><a href="#/cadastro">Criar uma conta</a></p>
-      <div class="demo-cred">
-        <strong>Contas de demonstração (temporárias)</strong><br>
-        Senha de todas: <code>${SENHA_DEMO}</code>
-        <div class="chips" style="margin-top:8px">
-          <button type="button" class="chip" data-demo="aluno@ptolomy.demo">Preencher: aluno</button>
-          <button type="button" class="chip" data-demo="admin@ptolomy.demo">Preencher: administrador</button>
-        </div>
       </div>
     </section>
   </div>`,
   montar(m) {
-    $$('[data-demo]', m).forEach(b => b.onclick = () => { $('#l-email').value = b.dataset.demo; $('#l-senha').value = SENHA_DEMO; $('#l-senha').focus(); });
     const f = $('#f-login', m), msg = $('#login-msg', m);
     if (avisoSessaoExpirada) { msgForm(msg, 'info', 'Sua sessão expirou por inatividade. Entre novamente.'); avisoSessaoExpirada = false; }
     f.onsubmit = async e => {
@@ -994,7 +984,7 @@ function htmlResultado(c, evs, novo) {
     const [ic, pos] = POSICAO[e.posicao];
     return `<li class="ev ${e.posicao}">
       <div class="ev-top"><strong>${esc(e.fonte_nome)}</strong><span class="badge ${e.tipo_fonte}">${TIPOS_FONTE[e.tipo_fonte]}</span></div>
-      ${url ? `<a class="dom" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(e.dominio)} <span aria-hidden="true">↗</span><span class="sr-only"> (abre em nova aba)</span></a>` : `<span class="hint">${esc(e.dominio)} — link indisponível (fonte fictícia de demonstração)</span>`}
+      ${url ? `<a class="dom" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(e.dominio)} <span aria-hidden="true">↗</span><span class="sr-only"> (abre em nova aba)</span></a>` : `<span class="hint">${esc(e.dominio)} — link indisponível (fonte fictícia)</span>`}
       <p>${esc(e.trecho_relevante)}</p>
       <div class="ev-meta"><span class="pos-tag ${e.posicao}"><span aria-hidden="true">${ic}</span>${pos}</span><span>Consultada em ${fmtData(e.data_consulta)}</span><span>${e.contabilizada ? `Impacto: ${e.peso_aplicado > 0 ? '+' : e.peso_aplicado < 0 ? '−' : ''}${Math.abs(e.peso_aplicado)}` : 'Não contabilizada (domínio repetido)'}</span></div>
     </li>`; }).join('')}</ul>`
@@ -1025,7 +1015,7 @@ function htmlResultado(c, evs, novo) {
     </div>
     <div class="card">
       <h3>Evidências <span class="muted" style="font-family:var(--font);font-weight:500">(${evs.length})</span></h3>
-      <p class="hint" style="margin-top:-4px;margin-bottom:12px">Evidências da Wikipédia levam ao artigo; as da base de demonstração levam à página inicial da fonte.</p>
+      <p class="hint" style="margin-top:-4px;margin-bottom:12px">Evidências da Wikipédia levam ao artigo; as da base local levam à página inicial da fonte.</p>
       ${evHtml}
     </div>
   </div>
@@ -1239,7 +1229,7 @@ function vPerfil() {
   </div>
   <section class="card danger-zone" style="margin-top:18px" aria-labelledby="p3">
     <h2 id="p3">Excluir conta</h2>
-    <p class="muted">Política de retenção deste protótipo: ao excluir a conta, todas as suas checagens e evidências são removidas permanentemente.</p>
+    <p class="muted">Política de retenção: ao excluir a conta, todas as suas checagens e evidências são removidas permanentemente.</p>
     <button class="btn btn-danger" id="btn-excluir">Excluir minha conta</button>
   </section>`,
   montar(m) {
@@ -1265,7 +1255,7 @@ function vPerfil() {
 /* ----- Administração ----- */
 let abaAdmin = 'fontes';
 function vAdmin() {
-  const abas = [['fontes', 'Fontes confiáveis'], ['usuarios', 'Usuários'], ['auditoria', 'Auditoria'], ['config', 'Demonstração']];
+  const abas = [['fontes', 'Fontes confiáveis'], ['usuarios', 'Usuários'], ['auditoria', 'Auditoria'], ['config', 'Configurações']];
   return { titulo: 'Administração', html: `
   <div class="page-head"><h1 tabindex="-1">Administração</h1><p class="lead">Gerencie as fontes usadas no cálculo do score e acompanhe a plataforma. Textos de checagens dos usuários não são exibidos aqui.</p></div>
   <div class="tabs" role="tablist" aria-label="Seções da administração">${abas.map(([k, r]) => `<button role="tab" id="tab-${k}" aria-controls="painel-admin" aria-selected="${abaAdmin === k}" tabindex="${abaAdmin === k ? 0 : -1}" data-aba="${k}">${r}</button>`).join('')}</div>
@@ -1346,7 +1336,7 @@ function adminUsuarios(p) {
   const us = [...DB.data.usuarios].sort((a, b) => a.data_cadastro.localeCompare(b.data_cadastro));
   p.innerHTML = `<p class="muted">${us.length} usuários cadastrados. Por privacidade, esta lista mostra só o volume de checagens, nunca o conteúdo.</p>
   <div class="card" style="padding:8px 14px"><div class="table-wrap"><table class="resp"><thead><tr><th scope="col">Nome</th><th scope="col">E-mail</th><th scope="col">Tipo</th><th scope="col">Cadastro</th><th scope="col">Checagens</th></tr></thead><tbody>
-  ${us.map(u => `<tr><td data-label="Nome">${esc(u.nome)}${u.demo ? ' <span class="badge">demo</span>' : ''}</td><td data-label="E-mail">${esc(u.email)}</td><td data-label="Tipo">${u.tipo === 'admin' ? 'Administrador' : 'Comum'}</td><td data-label="Cadastro">${fmtData(u.data_cadastro)}</td><td data-label="Checagens">${DB.data.checagens.filter(c => c.usuario_id === u.id).length}</td></tr>`).join('')}
+  ${us.map(u => `<tr><td data-label="Nome">${esc(u.nome)}</td><td data-label="E-mail">${esc(u.email)}</td><td data-label="Tipo">${u.tipo === 'admin' ? 'Administrador' : 'Comum'}</td><td data-label="Cadastro">${fmtData(u.data_cadastro)}</td><td data-label="Checagens">${DB.data.checagens.filter(c => c.usuario_id === u.id).length}</td></tr>`).join('')}
   </tbody></table></div></div>`;
 }
 
@@ -1360,20 +1350,20 @@ function adminAuditoria(p) {
 
 function adminConfig(p) {
   p.innerHTML = `<div class="two">
-    <section class="card"><h2>Simular falha externa</h2><p class="muted">Faz o serviço de fontes ficar indisponível, para demonstrar o tratamento de erro na apresentação.</p>
+    <section class="card"><h2>Simular falha externa</h2><p class="muted">Faz o serviço de fontes ficar indisponível, para testar a mensagem de erro.</p>
       <div class="check-row"><input type="checkbox" id="cfg-falha" ${DB.data.config.simularFalha ? 'checked' : ''}><label for="cfg-falha">Fonte externa indisponível</label></div></section>
-    <section class="card"><h2>Restaurar demonstração</h2><p class="muted">Apaga os dados deste navegador e recria as contas de exemplo. As análises salvas no banco continuam lá.</p>
-      <button class="btn btn-danger" id="cfg-reset">Restaurar dados de demonstração</button></section>
+    <section class="card"><h2>Restaurar dados iniciais</h2><p class="muted">Apaga os dados deste navegador e recria as contas iniciais. As análises salvas no banco continuam lá.</p>
+      <button class="btn btn-danger" id="cfg-reset">Restaurar dados iniciais</button></section>
   </div>`;
   $('#cfg-falha', p).onchange = e => { DB.data.config.simularFalha = e.target.checked; DB.auditar('Simulação de falha', e.target.checked ? 'ativada' : 'desativada'); DB.salvar(); toast(e.target.checked ? 'Falha simulada ativada.' : 'Falha simulada desativada.', 'ok'); };
   $('#cfg-reset', p).onclick = async () => {
-    if (!await confirmar('Restaurar dados de demonstração?', 'Todos os usuários, checagens e fontes deste navegador serão apagados e recriados. Você sairá da conta.', 'Restaurar', true)) return;
+    if (!await confirmar('Restaurar dados iniciais?', 'Todos os usuários, checagens e fontes deste navegador serão apagados e recriados. Você sairá da conta.', 'Restaurar', true)) return;
     try { localStorage.removeItem(KEY_DB); } catch (e) {}
-    encerrarSessao(); await criarDadosDemo(); toast('Dados de demonstração restaurados.', 'ok'); ir('#/login');
+    encerrarSessao(); await criarDadosIniciais(); toast('Dados iniciais restaurados.', 'ok'); ir('#/login');
   };
 }
 
-/* ----- Sobre / roteiro de apresentação ----- */
+/* ----- Sobre ----- */
 function vSobre() {
   const linhaPeso = (t, v) => `<tr><td>${t}</td><td>${v}</td></tr>`;
   return { titulo: 'Sobre', html: `
@@ -1387,25 +1377,11 @@ function vSobre() {
       </tbody></table></div>
       <p class="hint" style="margin-top:10px">Faixas: 70–100 confiável · 40–69 duvidoso / precisa de contexto · 0–39 provavelmente falso ou sem base.</p></section>
   </div>
-  <section class="card" style="margin-top:18px"><h2>Roteiro de demonstração</h2>
-    <p class="muted">Contas temporárias (senha <code>${SENHA_DEMO}</code>): aluno@ptolomy.demo (comum), maria@ptolomy.demo (comum) e admin@ptolomy.demo (administrador).</p>
-    <ol>
-      <li>Entrar como <strong>aluno</strong> e verificar “O Sol é uma estrela.” → resultado verde com evidências concordantes.</li>
-      <li>Verificar “Vitamina C previne gripe e resfriado.” → amarelo, com alerta de controvérsia.</li>
-      <li>Verificar “Investir em bitcoin é garantia de lucro.” → vermelho, contradito por fontes oficiais.</li>
-      <li>Verificar “As urnas eletrônicas passam por testes públicos de segurança organizados pelo TSE.” → tema sensível com só 1 fonte oficial: selo verde bloqueado.</li>
-      <li>Abrir o <strong>Histórico</strong>, filtrar por tema e cor, e abrir um detalhe.</li>
-      <li>Abrir o <strong>Painel</strong> e comentar a distribuição dos resultados.</li>
-      <li>Fazer uma checagem como Maria, copiar o endereço dela e abrir logado como aluno → acesso negado.</li>
-      <li>Entrar como <strong>admin</strong> e mudar o peso de uma fonte em Administração → Fontes confiáveis.</li>
-      <li>Ver o painel “Plataforma (agregado)”: só números, sem textos de outros usuários.</li>
-      <li>Em Administração → Demonstração, ativar a falha simulada e mostrar a mensagem de indisponibilidade.</li>
-    </ol></section>
   <div class="two" style="margin-top:18px">
-    <section class="card"><h2>Limitações deste protótipo</h2><ul>
+    <section class="card"><h2>Limitações atuais</h2><ul>
       <li>Funciona só no navegador: os dados ficam salvos no próprio computador (localStorage), não em um servidor.</li>
-      <li>Afirmações fora da <strong>base de demonstração</strong> são verificadas pelo backend em Python, que busca na Wikipédia e compara os números; sem frases parecidas, o resultado fica inconclusivo.</li>
-      <li>Senhas são guardadas com hash, mas o isolamento entre usuários aqui é demonstrativo. A versão real precisa de backend (ex.: Python + Supabase com regras de acesso por usuário).</li>
+      <li>Afirmações fora da <strong>base local</strong> são verificadas pelo backend em Python, que busca na Wikipédia e compara os números; sem frases parecidas, o resultado fica inconclusivo.</li>
+      <li>Senhas são guardadas com hash, mas o isolamento entre usuários ainda é feito no navegador. A próxima versão precisa de backend (ex.: Python + Supabase com regras de acesso por usuário).</li>
     </ul></section>
     <section class="card"><h2>Equipe</h2><ul><li>Integrante 1</li><li>Integrante 2</li><li>Integrante 3</li><li>Integrante 4</li></ul><p class="hint">Edite esta lista com os nomes da equipe.</p></section>
   </div>` };
@@ -1440,8 +1416,7 @@ function cabecalho(u, caminho) {
       ${links.map(([h, t, c]) => `<a href="${h}" ${atual === c ? 'aria-current="page"' : ''}>${t}</a>`).join('')}
       ${u ? `<span class="user-chip"><a href="#/perfil" ${atual === '/perfil' ? 'aria-current="page"' : ''} title="Meu perfil"><span class="avatar" aria-hidden="true">${esc(iniciais)}</span>&nbsp;<span>${esc(u.nome.split(' ')[0])}</span><span class="sr-only"> — meu perfil</span></a><button class="navbtn" id="btn-sair">Sair</button></span>` : ''}
     </nav>
-  </div></header>
-  <div class="demo-banner" role="note">Modo demonstração: os dados ficam salvos só neste navegador. Afirmações fora da base de exemplo são buscadas na Wikipédia pelo backend em Python.</div>`;
+  </div></header>`;
 }
 
 function render() {
@@ -1462,7 +1437,7 @@ function render() {
   if (u) { iniciarSessao(u); ultimaRenovacao = Date.now(); }
 
   const app = $('#app');
-  app.innerHTML = cabecalho(u, caminho) + `<main id="main" tabindex="-1">${v.html}</main><footer class="foot">Ptolomy.AI · Projeto acadêmico de checagem de fatos · Protótipo em modo demonstração</footer>`;
+  app.innerHTML = cabecalho(u, caminho) + `<main id="main" tabindex="-1">${v.html}</main><footer class="foot">Ptolomy.AI · Projeto acadêmico de checagem de fatos</footer>`;
   document.title = `${v.titulo || 'Ptolomy.AI'} · Ptolomy.AI`;
   const tg = $('#menu-toggle'), nav = $('#nav-principal');
   tg.onclick = () => { const ab = nav.classList.toggle('open'); tg.setAttribute('aria-expanded', ab); };
@@ -1476,8 +1451,22 @@ function render() {
 /* ---------- Inicialização ---------- */
 async function iniciar() {
   $('#app').innerHTML = `<main style="text-align:center;padding:80px 16px" aria-busy="true">${mascote(72)}<p class="muted">Preparando a Ptolomy.AI…</p></main>`;
-  if (!DB.carregar() || !DB.data.usuarios) await criarDadosDemo();
+  if (!DB.carregar() || !DB.data.usuarios) await criarDadosIniciais();
   DB.data.config = DB.data.config || { simularFalha: false };
+  // Contas criadas pela versão antiga: troca e-mail, nome e senha para os atuais
+  const CONTAS_ANTIGAS = { 'admin@ptolomy.demo': ['admin@ptolomy.ai', 'Admin Ptolomy'], 'aluno@ptolomy.demo': ['aluno@ptolomy.ai', 'Aluno Ptolomy'], 'maria@ptolomy.demo': ['maria@ptolomy.ai', 'Maria Souza'] };
+  let migrou = false;
+  for (const u of DB.data.usuarios) {
+    const novo = CONTAS_ANTIGAS[u.email];
+    if (novo) { [u.email, u.nome] = novo; migrou = true; }
+    if (u.demo) {
+      if (await hashSenha(SENHA_ANTIGA, u.sal) === u.senha_hash) u.senha_hash = await hashSenha(SENHA_INICIAL, u.sal);
+      delete u.demo; migrou = true;
+    }
+  }
+  for (const a of DB.data.auditoria || []) if (a.acao === 'Dados de demonstração criados') { a.acao = 'Dados iniciais criados'; a.detalhe = '3 usuários iniciais (as checagens ficam no banco)'; migrou = true; }
+  for (const f of DB.data.fontes_confiaveis || []) if (f.observacao === 'Fonte fictícia, usada só para demonstrar fontes não confiáveis.') { f.observacao = 'Fonte fictícia, usada como exemplo de fonte não confiável.'; migrou = true; }
+  if (migrou) DB.salvar();
   // Quem já tinha dados salvos ganha a fonte Wikipédia
   if (!DB.data.fontes_confiaveis.some(f => f.dominio === 'pt.wikipedia.org')) {
     DB.data.fontes_confiaveis.push({ id: uid('fnt'), nome: 'Wikipédia', dominio: 'pt.wikipedia.org', tipo: 'outra', peso: PESO_PADRAO.outra, ativa: true, observacao: 'Usada pelo backend em Python na busca automática.', ficticia: false, data_atualizacao: agoraISO() });
