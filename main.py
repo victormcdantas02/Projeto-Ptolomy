@@ -3,7 +3,14 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from verificador import analisar_texto
-from banco import criar_tabela, salvar_analise, buscar_analise, listar_analises
+from banco import (
+    STATUS_VALIDOS,
+    criar_tabela,
+    salvar_analise,
+    buscar_analise,
+    listar_analises,
+    atualizar_analise
+)
 
 app = FastAPI()
 
@@ -29,6 +36,11 @@ class NovaAnalise(BaseModel):
     ia_origem: str = Field(min_length=1, max_length=40)
     resultado: dict
     fontes: list
+
+# Dados que podem ser editados depois
+class EdicaoAnalise(BaseModel):
+    status_validacao: str
+    observacao: str = Field(default="", max_length=500)
 
 @app.get("/")
 def inicio():
@@ -75,3 +87,16 @@ def detalhar(analise_id: int):
         raise HTTPException(status_code=404, detail="Análise não encontrada")
 
     return analise
+
+@app.put("/analises/{analise_id}")
+def editar(analise_id: int, dados: EdicaoAnalise):
+
+    if dados.status_validacao not in STATUS_VALIDOS:
+        raise HTTPException(status_code=400, detail="Status inválido")
+
+    alterou = atualizar_analise(analise_id, dados.status_validacao, dados.observacao)
+
+    if not alterou:
+        raise HTTPException(status_code=404, detail="Análise não encontrada")
+
+    return buscar_analise(analise_id)

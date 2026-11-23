@@ -5,6 +5,9 @@ from datetime import datetime
 # Arquivo do banco de dados (criado sozinho na primeira vez)
 ARQUIVO_BANCO = "ptolomy.db"
 
+# Status que o aluno pode escolher ao validar uma análise
+STATUS_VALIDOS = ["não verificado", "confirmado", "falso"]
+
 
 def conectar():
     conexao = sqlite3.connect(ARQUIVO_BANCO)
@@ -111,3 +114,20 @@ def listar_analises(usuario_id=None):
     conexao.close()
 
     return [linha_para_dict(linha) for linha in linhas]
+
+
+# UPDATE - muda o status da validação e a observação
+# (devolve False se a análise não existir)
+def atualizar_analise(analise_id, status_validacao, observacao):
+
+    conexao = conectar()
+
+    cursor = conexao.execute(
+        "UPDATE analises SET status_validacao = ?, observacao = ? WHERE id = ?",
+        (status_validacao, observacao, analise_id)
+    )
+
+    conexao.commit()
+    conexao.close()
+
+    return cursor.rowcount > 0
