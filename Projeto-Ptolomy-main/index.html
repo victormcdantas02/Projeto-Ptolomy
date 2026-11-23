@@ -1175,6 +1175,11 @@ function vDetalhe(id) {
       <button class="btn btn-primary" type="submit">Salvar validação</button>
     </form>
   </section>
+  <section class="card danger-zone" style="margin-top:18px" aria-labelledby="exc-t">
+    <h2 id="exc-t">Excluir análise</h2>
+    <p class="muted">A análise é apagada do banco e não pode ser recuperada.</p>
+    <button class="btn btn-danger" id="btn-excluir-analise">Excluir análise</button>
+  </section>
   <p class="hint">Este é o resultado registrado na data da checagem; ele não é recalculado ao ser aberto.</p>`,
     montar(m) {
       ligarResultado(m);
@@ -1186,6 +1191,17 @@ function vDetalhe(id) {
           c.status_validacao = a.status_validacao; c.observacao = a.observacao;
           toast('Validação salva.', 'ok');
         } catch (err) { toast('Não foi possível salvar a validação.', 'erro'); }
+      };
+      // DELETE: pede confirmação e apaga no backend
+      $('#btn-excluir-analise', m).onclick = async () => {
+        if (!await confirmar('Excluir análise?', 'Esta ação não pode ser desfeita.', 'Excluir', true)) return;
+        try {
+          await api('/analises/' + c.id, { method: 'DELETE' });
+          DB.data.checagens = DB.data.checagens.filter(x => x.id !== c.id);
+          DB.data.evidencias = DB.data.evidencias.filter(x => x.checagem_id !== c.id);
+          toast('Análise excluída.', 'ok');
+          ir('#/historico');
+        } catch (err) { toast('Não foi possível excluir a análise.', 'erro'); }
       };
     } };
 }
