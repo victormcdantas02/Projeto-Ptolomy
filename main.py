@@ -1,7 +1,6 @@
 import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
 from verificador import analisar_texto
 from banco import (
     STATUS_VALIDOS,
@@ -31,19 +30,6 @@ def validar_texto(texto):
     if len(texto) < 15 or len(texto) > 2000:
         raise HTTPException(status_code=422, detail="O texto precisa ter entre 15 e 2000 caracteres")
 
-# Dados que o site manda para salvar uma análise
-class NovaAnalise(BaseModel):
-    usuario_id: str = ""
-    texto: str = Field(min_length=15, max_length=2000)
-    ia_origem: str = Field(min_length=1, max_length=40)
-    resultado: dict
-    fontes: list
-
-# Dados que podem ser editados depois
-class EdicaoAnalise(BaseModel):
-    status_validacao: str
-    observacao: str = Field(default="", max_length=500)
-
 @app.get("/")
 def inicio():
     return {"mensagem": "API funcionando!"}
@@ -66,14 +52,22 @@ def verificar(dados: dict):
 # CRUD de análises ----------------------------------------------
 
 @app.post("/analises", status_code=201)
-def cadastrar_analise(dados: NovaAnalise):
+def cadastrar_analise(dados: dict):
+
+    texto = str(dados.get("texto", ""))
+    ia_origem = str(dados.get("ia_origem", ""))
+
+    validar_texto(texto)
+
+    if ia_origem == "" or len(ia_origem) > 40:
+        raise HTTPException(status_code=422, detail="Informe qual IA gerou o texto")
 
     novo_id = salvar_analise(
-        dados.usuario_id,
-        dados.texto,
-        dados.ia_origem,
-        dados.resultado,
-        dados.fontes
+        str(dados.get("usuario_id", "")),
+        texto,
+        ia_origem,
+        dados.get("resultado", {}),
+        dados.get("fontes", [])
     )
 
     return buscar_analise(novo_id)
@@ -93,12 +87,18 @@ def detalhar(analise_id: int):
     return analise
 
 @app.put("/analises/{analise_id}")
-def editar(analise_id: int, dados: EdicaoAnalise):
+def editar(analise_id: int, dados: dict):
 
-    if dados.status_validacao not in STATUS_VALIDOS:
+    status_validacao = dados.get("status_validacao", "")
+    observacao = str(dados.get("observacao", ""))
+
+    if status_validacao not in STATUS_VALIDOS:
         raise HTTPException(status_code=400, detail="Status inválido")
 
-    alterou = atualizar_analise(analise_id, dados.status_validacao, dados.observacao)
+    if len(observacao) > 500:
+        raise HTTPException(status_code=422, detail="A observação pode ter no máximo 500 caracteres")
+
+    alterou = atualizar_analise(analise_id, status_validacao, observacao)
 
     if not alterou:
         raise HTTPException(status_code=404, detail="Análise não encontrada")
