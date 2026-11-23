@@ -26,6 +26,19 @@ e explica o porquê. Assim, frases sem número (como "O Brasil é um país") tam
 Sem a chave, ou se a IA falhar, o Ptolomy continua funcionando com a comparação de números
 (`comparador.py`). A resposta de `/verificar` diz qual foi usada no campo `metodo` (`ia` ou `numerico`).
 
+## Site publicado (Netlify)
+
+O site também roda no Netlify. Como o Netlify não roda Python, lá o backend são duas
+funções em TypeScript que fazem o mesmo papel do `main.py`:
+
+- `netlify/functions/verificar.mts` — busca na Wikipédia e pede para o Claude julgar as fontes,
+  dar a veracidade (0 a 100%) com margem de erro e responder perguntas
+- `netlify/functions/analises.mts` — CRUD de análises, guardado no Netlify Blobs
+
+Para publicar: `npm install`, depois `npx netlify-cli deploy --build --prod`.
+A chave da IA vai em **Project configuration > Environment variables** do Netlify, com o nome
+`ANTHROPIC_API_KEY`. Sem ela, as funções usam o AI Gateway do Netlify (gasta créditos do Netlify).
+
 ## Testes
 
 ```

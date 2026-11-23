@@ -15,3 +15,8 @@ teste_analises.db
 
 # Configurações locais
 .vscode/
+
+# Netlify
+node_modules/
+public/
+.netlify/

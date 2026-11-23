@@ -1,0 +1,6 @@
+# Site no Netlify: só o index.html vai para a pasta publicada (public/).
+# O back-end online são as funções em netlify/functions (verificar e analises).
+[build]
+  command = "node -e \"const fs=require('fs');fs.mkdirSync('public',{recursive:true});fs.copyFileSync('index.html','public/index.html')\""
+  publish = "public"
+  functions = "netlify/functions"

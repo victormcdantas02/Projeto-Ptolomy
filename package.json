@@ -1,0 +1,11 @@
+{
+  "name": "ptolomyai",
+  "private": true,
+  "type": "module",
+  "description": "Funções do Netlify do Ptolomy.AI (verificação com IA e histórico de análises)",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.13.0",
+    "@netlify/blobs": "^11.1.10",
+    "@netlify/functions": "^6.1.1"
+  }
+}
