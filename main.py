@@ -65,3 +65,13 @@ def cadastrar_analise(dados: NovaAnalise):
 @app.get("/analises")
 def listar(usuario_id: str = ""):
     return listar_analises(usuario_id)
+
+@app.get("/analises/{analise_id}")
+def detalhar(analise_id: int):
+
+    analise = buscar_analise(analise_id)
+
+    if analise is None:
+        raise HTTPException(status_code=404, detail="Análise não encontrada")
+
+    return analise
