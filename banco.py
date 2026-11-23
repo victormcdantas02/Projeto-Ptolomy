@@ -11,8 +11,6 @@ STATUS_VALIDOS = ["não verificado", "confirmado", "falso"]
 
 def conectar():
     conexao = sqlite3.connect(ARQUIVO_BANCO)
-    # Permite pegar as colunas pelo nome: linha["texto"]
-    conexao.row_factory = sqlite3.Row
     return conexao
 
 
@@ -39,12 +37,23 @@ def criar_tabela():
     conexao.close()
 
 
-# Transforma uma linha do banco em dicionário (o JSON volta a ser lista/dicionário)
+# Transforma uma linha do banco em dicionário.
+# A linha vem como TUPLA, na mesma ordem das colunas da tabela:
+# (id, usuario_id, texto, ia_origem, resultado, fontes, status_validacao, observacao, data)
 def linha_para_dict(linha):
 
-    analise = dict(linha)
-    analise["resultado"] = json.loads(analise["resultado"])
-    analise["fontes"] = json.loads(analise["fontes"])
+    analise = {
+        "id": linha[0],
+        "usuario_id": linha[1],
+        "texto": linha[2],
+        "ia_origem": linha[3],
+        # resultado e fontes foram guardados como texto JSON: voltam a ser dicionário/lista
+        "resultado": json.loads(linha[4]),
+        "fontes": json.loads(linha[5]),
+        "status_validacao": linha[6],
+        "observacao": linha[7],
+        "data": linha[8]
+    }
 
     return analise
 
