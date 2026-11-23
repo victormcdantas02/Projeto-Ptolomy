@@ -52,23 +52,20 @@ def separar_palavras(texto):
 # 1. Extrair palavras-chave automaticamente
 def extrair_palavras_chave(afirmacao):
 
-    palavras_ignoradas = {
+    palavras_ignoradas = [
         "o", "a", "os", "as",
         "um", "uma", "de", "do", "da",
         "dos", "das", "em", "no", "na",
         "e", "possui", "tem", "é"
-    }
-
-    palavras = re.findall(
-        r"[a-zA-ZÀ-ÿ]+",
-        afirmacao.lower()
-    )
+    ]
 
     palavras_chave = []
 
-    for palavra in palavras:
+    for palavra in separar_palavras(afirmacao):
 
-        if palavra not in palavras_ignoradas:
+        # Fica só com palavras feitas de letras (sem números)
+        # e que não estão na lista de ignoradas
+        if palavra.isalpha() and palavra not in palavras_ignoradas:
             palavras_chave.append(palavra)
 
     return palavras_chave
