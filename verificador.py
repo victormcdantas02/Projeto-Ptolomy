@@ -1,7 +1,6 @@
-import re
-
 from buscador import buscar_fontes
 from comparador import (
+    separar_frases,
     comparar_com_fontes,
     resumir_evidencias,
     determinar_resultado_geral,
@@ -40,9 +39,8 @@ def analisar_texto(texto):
     afirmacoes = []
     perguntas = []
 
-    # 1. Separar o texto em frases
-    # (corta depois de . ! ? seguido de espaço, para não quebrar "5.571")
-    frases = re.split(r"(?<=[.!?])\s+", texto)
+    # 1. Separar o texto em frases (sem quebrar números como "5.571")
+    frases = separar_frases(texto)
 
     # 2. Analisar cada frase
     for frase in frases:

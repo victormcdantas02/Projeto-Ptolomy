@@ -2,6 +2,34 @@
 import re
 
 
+# Separa um texto em frases, olhando letra por letra.
+# Corta depois de . ! ? mas não no ponto de números como "5.571"
+def separar_frases(texto):
+
+    frases = []
+    atual = ""
+
+    for i in range(len(texto)):
+
+        letra = texto[i]
+        atual = atual + letra
+
+        if letra in ".!?":
+
+            # Se o próximo caractere for um dígito, é ponto de número
+            if i + 1 < len(texto) and texto[i + 1].isdigit():
+                continue
+
+            frases.append(atual.strip())
+            atual = ""
+
+    # Sobrou um pedaço sem pontuação no final
+    if atual.strip() != "":
+        frases.append(atual.strip())
+
+    return frases
+
+
 # 1. Extrair palavras-chave automaticamente
 def extrair_palavras_chave(afirmacao):
 
