@@ -1,3 +1,6 @@
+import anthropic
+
+import ia
 from buscador import buscar_fontes
 from comparador import (
     separar_frases,
@@ -40,6 +43,50 @@ def montar_evidencias(fontes_relevantes):
     return evidencias
 
 
+# Monta as evidências a partir do que a IA decidiu sobre cada fonte
+def montar_evidencias_ia(avaliacoes, fontes):
+
+    evidencias = []
+
+    for avaliacao in avaliacoes:
+
+        fonte = fontes[avaliacao["indice"]]
+
+        # Sem trecho (fonte neutra), mostra o começo do resumo do artigo
+        trecho = avaliacao["trecho"].strip()
+
+        if trecho == "":
+            trecho = fonte["descricao"][:200]
+
+        evidencias.append({
+            "titulo": fonte["titulo"],
+            "url": fonte["url"],
+            "posicao": avaliacao["posicao"],
+            "trecho": trecho,
+            "justificativa": avaliacao["justificativa"]
+        })
+
+    return evidencias
+
+
+# Pede para a IA julgar as fontes. Devolve None se não der (sem chave, erro ou recusa)
+def avaliar_com_ia(frase, fontes):
+
+    if not ia.ia_disponivel():
+        return None
+
+    try:
+        avaliacoes = ia.avaliar_fontes(frase, fontes)
+    except anthropic.APIError:
+        # Chave inválida, sem crédito, sem internet... segue com a comparação de números
+        return None
+
+    if avaliacoes is None:
+        return None
+
+    return montar_evidencias_ia(avaliacoes, fontes)
+
+
 def analisar_texto(texto):
 
     afirmacoes = []
@@ -79,6 +126,14 @@ def analisar_texto(texto):
             resultado_comparacao
             )
 
+            # A IA lê os trechos e decide; se não estiver disponível, vale a comparação de números
+            evidencias = avaliar_com_ia(frase, resultado_busca["fontes"])
+            metodo = "ia"
+
+            if evidencias is None:
+                evidencias = montar_evidencias(fontes_relevantes)
+                metodo = "numerico"
+
             # Organizar os dados da afirmação
             afirmacao = {
                 "id": len(afirmacoes) + 1,
@@ -89,7 +144,8 @@ def analisar_texto(texto):
                 "resumo_evidencias": resumo,
                 "resultado_geral": resultado_geral,
                 "fontes_relevantes": fontes_relevantes,
-                "evidencias": montar_evidencias(fontes_relevantes)
+                "evidencias": evidencias,
+                "metodo": metodo
             }
 
             afirmacoes.append(afirmacao)

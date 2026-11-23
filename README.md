@@ -13,6 +13,19 @@ uvicorn main:app --reload
 
 Depois abra o arquivo `index.html` no navegador.
 
+## IA na checagem (Claude)
+
+Com uma chave da API da Anthropic, o backend manda a afirmação e os trechos da Wikipédia
+para o Claude (`claude-opus-5-5`), que decide se cada fonte confirma, contradiz ou é neutra
+e explica o porquê. Assim, frases sem número (como "O Brasil é um país") também são verificadas.
+
+1. Crie uma chave em <https://console.anthropic.com/settings/keys> (a conta precisa ter crédito).
+2. Copie `.env.example` para `.env` e cole a chave em `ANTHROPIC_API_KEY`. O `.env` não vai para o Git.
+3. Reinicie o `uvicorn`.
+
+Sem a chave, ou se a IA falhar, o Ptolomy continua funcionando com a comparação de números
+(`comparador.py`). A resposta de `/verificar` diz qual foi usada no campo `metodo` (`ia` ou `numerico`).
+
 ## Testes
 
 ```
@@ -39,4 +52,5 @@ Com o servidor rodando, dá para testar as rotas em <http://127.0.0.1:8000/docs>
 - `verificador.py` — separa o texto em frases e monta o resultado
 - `buscador.py` — busca artigos na Wikipédia
 - `comparador.py` — compara os números da afirmação com os das fontes
+- `ia.py` — pede para o Claude julgar se cada fonte confirma ou contradiz a afirmação
 - `index.html` — site (login, checagem, histórico, painel)

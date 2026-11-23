@@ -16,6 +16,14 @@ def busca_falsa(afirmacao):
 verificador.buscar_fontes = busca_falsa
 
 
+# Estes testes conferem a comparação de números, então a IA fica desligada
+def ia_desligada():
+    return False
+
+
+verificador.ia.ia_disponivel = ia_desligada
+
+
 def test_fonte_confirma():
     resultado = verificador.analisar_texto("O Brasil possui 26 estados.")
     evidencia = resultado["afirmacoes"][0]["evidencias"][0]
