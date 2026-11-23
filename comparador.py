@@ -30,6 +30,25 @@ def separar_frases(texto):
     return frases
 
 
+# Pontuação que tiramos das pontas de cada palavra
+PONTUACAO = ".,;:!?()\"'"
+
+
+# Separa um texto em palavras: minúsculas e sem pontuação nas pontas
+def separar_palavras(texto):
+
+    palavras = []
+
+    for palavra in texto.lower().split():
+
+        palavra = palavra.strip(PONTUACAO)
+
+        if palavra != "":
+            palavras.append(palavra)
+
+    return palavras
+
+
 # 1. Extrair palavras-chave automaticamente
 def extrair_palavras_chave(afirmacao):
 
@@ -59,8 +78,7 @@ def extrair_palavras_chave(afirmacao):
 
 def filtrar_frases_por_contexto(evidencia, palavras_chave):
 
-    # Corta no ponto final, mas não no ponto de números como "5.571"
-    frases = re.split(r"[.!?](?!\d)", evidencia)
+    frases = separar_frases(evidencia)
 
     relevantes = []
 
@@ -69,17 +87,18 @@ def filtrar_frases_por_contexto(evidencia, palavras_chave):
 
     for frase in frases:
 
-        todas_presentes = all(
-            re.search(
-                rf"\b{re.escape(palavra)}\b",
-                frase,
-                re.IGNORECASE
-            )
-            for palavra in palavras_chave
-        )
+        palavras_da_frase = separar_palavras(frase)
+
+        # A frase só serve se tiver TODAS as palavras-chave
+        todas_presentes = True
+
+        for palavra in palavras_chave:
+            if palavra not in palavras_da_frase:
+                todas_presentes = False
 
         if todas_presentes:
-            relevantes.append(frase.strip())
+            # Guarda a frase sem a pontuação do final
+            relevantes.append(frase.strip(" .!?"))
 
     return relevantes
 
