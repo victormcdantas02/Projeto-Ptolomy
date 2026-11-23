@@ -51,10 +51,23 @@ def pesquisar_wikipedia(termo):
 
     dados = resposta.json()
 
-    paginas = dados.get("query", {}).get("pages", {})
+    # Se a Wikipédia não achou nada, não vem "query" na resposta
+    if "query" not in dados:
+        return []
 
-    # Mantém a ordem de relevância da busca
-    return sorted(paginas.values(), key=lambda pagina: pagina["index"])
+    paginas = []
+
+    for pagina in dados["query"]["pages"].values():
+        paginas.append(pagina)
+
+    # Ordena pela relevância da busca (campo "index": 1, 2, 3...)
+    # usando o bubble sort: troca vizinhos fora de ordem
+    for i in range(len(paginas)):
+        for j in range(len(paginas) - 1 - i):
+            if paginas[j]["index"] > paginas[j + 1]["index"]:
+                paginas[j], paginas[j + 1] = paginas[j + 1], paginas[j]
+
+    return paginas
 
 
 # PASSO 3 - Buscar fontes para uma afirmação
