@@ -1,3 +1,6 @@
+import json
+import logging
+
 import anthropic
 
 import ia
@@ -10,35 +13,58 @@ from comparador import (
     filtrar_fontes_com_evidencias
 )
 
+logger = logging.getLogger(__name__)
+
+
+def _categoria_falha_ia(erro):
+    if isinstance(erro, anthropic.APITimeoutError):
+        return "timeout"
+    if isinstance(erro, anthropic.AuthenticationError):
+        return "erro_autenticacao"
+    if isinstance(erro, anthropic.RateLimitError):
+        corpo = getattr(erro, "body", None)
+        tipo = ""
+        if isinstance(corpo, dict):
+            tipo = str((corpo.get("error") or {}).get("type", "")).casefold()
+        return "creditos_insuficientes" if "billing" in tipo or "credit" in tipo else "limite_requisicoes"
+    if isinstance(erro, anthropic.APIStatusError):
+        corpo = getattr(erro, "body", None)
+        tipo = ""
+        if isinstance(corpo, dict):
+            tipo = str((corpo.get("error") or {}).get("type", "")).casefold()
+        if erro.status_code == 402 or "billing" in tipo or "credit" in tipo:
+            return "creditos_insuficientes"
+    if isinstance(erro, anthropic.APIConnectionError):
+        return "falha_conexao"
+    if isinstance(erro, anthropic.APIError):
+        return "erro_api"
+    return "falha_processamento"
+
+
 # Traduz o resultado da comparação para a posição que o site mostra
-def definir_posicao(resultado):
-
-    if resultado == "compatibilidade_numerica":
-        return "confirma"
-
-    elif resultado == "divergencia_numerica":
-        return "contradiz"
-
-    else:
-        return "neutra"
-
-
 def montar_evidencias(fontes_relevantes):
 
     evidencias = []
 
     for fonte in fontes_relevantes:
 
-        # Resume as frases desta fonte e vê se ela confirma ou contradiz
-        resumo = resumir_evidencias([fonte])
-        resultado = determinar_resultado_geral(resumo)
-
-        evidencias.append({
-            "titulo": fonte["titulo"],
-            "url": fonte["url"],
-            "posicao": definir_posicao(resultado),
-            "trecho": fonte["comparacoes"][0]["frase"]
-        })
+        trechos_por_posicao = {}
+        for comparacao in fonte["comparacoes"]:
+            posicao = {
+                "compativel": "confirma",
+                "divergente": "contradiz",
+            }.get(comparacao["classificacao"], "neutra")
+            trechos_por_posicao.setdefault(posicao, comparacao["frase"])
+        if len(trechos_por_posicao) > 1:
+            trechos_por_posicao.pop("neutra", None)
+        for posicao, trecho in trechos_por_posicao.items():
+            evidencias.append({
+                "titulo": fonte["titulo"],
+                "url": fonte["url"],
+                "tipo_fonte": fonte.get("tipo_fonte", "outra"),
+                "posicao": posicao,
+                "trecho": trecho,
+            })
 
     return evidencias
 
@@ -54,37 +80,57 @@ def montar_evidencias_ia(avaliacoes, fontes):
 
         # Sem trecho (fonte neutra), mostra o começo do resumo do artigo
         trecho = avaliacao["trecho"].strip()
+        posicao = avaliacao["posicao"]
+        justificativa = avaliacao["justificativa"]
 
-        if trecho == "":
+        trecho_valido = bool(trecho and trecho in fonte["descricao"])
+        if not trecho_valido and (trecho or posicao != "neutra"):
+            trecho = fonte["descricao"][:200]
+            posicao = "neutra"
+            justificativa = "O trecho atribuído à fonte não pôde ser confirmado no conteúdo consultado."
+        elif trecho == "":
             trecho = fonte["descricao"][:200]
 
         evidencias.append({
             "titulo": fonte["titulo"],
             "url": fonte["url"],
-            "posicao": avaliacao["posicao"],
+            "tipo_fonte": fonte.get("tipo_fonte", "enciclopedia"),
+            "posicao": posicao,
             "trecho": trecho,
-            "justificativa": avaliacao["justificativa"]
+            "justificativa": justificativa,
+            "comparada": trecho_valido,
         })
 
     return evidencias
 
 
-# Pede para a IA julgar as fontes. Devolve None se não der (sem chave, erro ou recusa)
+# Pede para a IA relacionar afirmação e fontes, sem estimar probabilidades.
 def avaliar_com_ia(frase, fontes):
 
     if not ia.ia_disponivel():
-        return None
+        logger.info("Claude indisponível: ANTHROPIC_API_KEY ausente; usando comparação local.")
+        return None, "chave_ausente"
 
     try:
         avaliacoes = ia.avaliar_fontes(frase, fontes)
-    except anthropic.APIError:
-        # Chave inválida, sem crédito, sem internet... segue com a comparação de números
-        return None
-
-    if avaliacoes is None:
-        return None
-
-    return montar_evidencias_ia(avaliacoes, fontes)
+        if avaliacoes is None:
+            logger.warning("Claude recusou ou não retornou avaliações; usando comparação local.")
+            return None, "resposta_indisponivel"
+        return montar_evidencias_ia(avaliacoes, fontes), "disponivel"
+    except anthropic.APIError as erro:
+        categoria = _categoria_falha_ia(erro)
+        logger.warning(
+            "Análise por Claude indisponível (%s, HTTP %s); usando comparação local.",
+            categoria,
+            getattr(erro, "status_code", None),
+        )
+        return None, categoria
+    except (json.JSONDecodeError, StopIteration, KeyError, TypeError, IndexError) as erro:
+        logger.warning(
+            "Falha ao processar a resposta de Claude (%s); usando comparação local.",
+            type(erro).__name__,
+        )
+        return None, "falha_processamento"
 
 
 def analisar_texto(texto):
@@ -127,13 +173,34 @@ def analisar_texto(texto):
             )
 
             # A IA lê os trechos e decide; se não estiver disponível, vale a comparação de números
-            evidencias = avaliar_com_ia(frase, resultado_busca["fontes"])
-            metodo = "ia"
+            urls_relevantes = {fonte["url"] for fonte in fontes_relevantes}
+            evidencias, diagnostico_ia = avaliar_com_ia(
+                frase,
+                [fonte for fonte in resultado_busca["fontes"] if fonte["url"] in urls_relevantes],
+            )
+            metodo = "ia" if evidencias is not None else "numerico"
 
             if evidencias is None:
                 evidencias = montar_evidencias(fontes_relevantes)
-                metodo = "numerico"
 
+            urls_avaliadas = {evidencia["url"] for evidencia in evidencias}
+            for fonte in resultado_busca["fontes"]:
+                if fonte["url"] not in urls_avaliadas:
+                    evidencias.append({
+                        "titulo": fonte["titulo"],
+                        "url": fonte["url"],
+                        "tipo_fonte": fonte.get("tipo_fonte", "enciclopedia"),
+                        "posicao": "neutra",
+                        "comparada": False,
+                        "trecho": fonte["descricao"][:200],
+                        "justificativa": (
+                            "Fonte consultada, mas sem trecho suficiente para classificar "
+                            "a afirmação."
+                        ),
+                    })
+
+            confirmam = sum(e["posicao"] == "confirma" for e in evidencias)
+            contradizem = sum(e["posicao"] == "contradiz" for e in evidencias)
             # Organizar os dados da afirmação
             afirmacao = {
                 "id": len(afirmacoes) + 1,
@@ -143,9 +210,17 @@ def analisar_texto(texto):
                 "comparacoes": resultado_comparacao,
                 "resumo_evidencias": resumo,
                 "resultado_geral": resultado_geral,
+                "status_evidencias": (
+                    "evidencias_insuficientes"
+                    if confirmam + contradizem == 0
+                    else "evidencias_mistas"
+                    if confirmam and contradizem
+                    else "evidencias_disponiveis"
+                ),
                 "fontes_relevantes": fontes_relevantes,
                 "evidencias": evidencias,
-                "metodo": metodo
+                "metodo": metodo,
+                "diagnostico_ia": diagnostico_ia,
             }
 
             afirmacoes.append(afirmacao)

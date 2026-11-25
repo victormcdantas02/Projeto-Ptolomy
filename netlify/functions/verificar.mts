@@ -6,13 +6,87 @@ import Anthropic from "@anthropic-ai/sdk"
 import type { Config } from "@netlify/functions"
 
 const URL_WIKIPEDIA = "https://pt.wikipedia.org/w/api.php"
+const URL_IBGE_UFS = "https://servicodados.ibge.gov.br/api/v1/localidades/estados"
+const URL_WIKIDATA = "https://www.wikidata.org/w/api.php"
 const MODELO = "claude-opus-5-5"
 const MAX_AFIRMACOES = 10
+const MAX_CONSULTAS_WIKIPEDIA = 3
+const MAX_RESULTADOS_POR_CONSULTA = 8
+const MAX_EXTRATOS_POR_LOTE = 20
+const MAX_FONTES = 6
+const MAX_CARACTERES_EXCERTO = 2500
+const TEMPO_CACHE_MS = 10 * 60 * 1000
+const INTERVALO_REQUISICOES_MS = 500
+const MAX_TENTATIVAS_REQUISICAO = 2
+const MAX_ESPERA_RETRY_MS = 5000
+const MAX_ITENS_CACHE = 256
 
 const PALAVRAS_IGNORADAS = new Set([
   "o", "a", "os", "as", "um", "uma", "de", "do", "da",
   "dos", "das", "em", "no", "na", "e", "possui", "tem", "é",
+  "sao", "ser", "um", "uma", "por", "com", "para", "que",
+  "qual", "como", "afirmacao", "informacao", "segundo",
 ])
+const PALAVRAS_NUMERICAS = new Set([
+  "zero", "um", "uma", "dois", "duas", "tres", "quatro", "cinco",
+  "seis", "sete", "oito", "nove", "dez", "onze", "doze", "treze",
+  "catorze", "quatorze", "quinze", "dezesseis", "dezassete", "dezessete",
+  "dezoito", "dezenove", "vinte", "trinta", "quarenta", "cinquenta",
+  "sessenta", "setenta", "oitenta", "noventa",
+])
+
+type Pagina = { pageid: number; title: string; index?: number; extract?: string }
+type Fonte = { titulo: string; descricao: string; url: string; tipo_fonte?: string }
+
+const cacheRespostas = new Map<string, { expira: number; dados: unknown }>()
+let filaRequisicoes: Promise<unknown> = Promise.resolve()
+let ultimaRequisicao = 0
+
+function clonar<T>(valor: T): T {
+  return JSON.parse(JSON.stringify(valor)) as T
+}
+
+async function obterJson<T>(url: string): Promise<T> {
+  const cacheado = cacheRespostas.get(url)
+  if (cacheado && cacheado.expira > Date.now()) return clonar(cacheado.dados as T)
+
+  const requisicao = filaRequisicoes.then(async () => {
+    const existente = cacheRespostas.get(url)
+    if (existente && existente.expira > Date.now()) return clonar(existente.dados as T)
+
+    const espera = Math.max(0, ultimaRequisicao + INTERVALO_REQUISICOES_MS - Date.now())
+    if (espera) await new Promise((resolver) => setTimeout(resolver, espera))
+    let resposta: Response | undefined
+    for (let tentativa = 0; tentativa < MAX_TENTATIVAS_REQUISICAO; tentativa++) {
+      resposta = await fetch(url, {
+        headers: { "User-Agent": "ProjetoPtolomy/1.0 (projeto academico)" },
+        signal: AbortSignal.timeout(10000),
+      })
+      ultimaRequisicao = Date.now()
+      if (![429, 500, 502, 503, 504].includes(resposta.status)
+        || tentativa + 1 === MAX_TENTATIVAS_REQUISICAO) break
+      const retryAfter = Number(resposta.headers.get("Retry-After") ?? "1")
+      const esperaRetry = Number.isFinite(retryAfter) ? retryAfter * 1000 : 1000
+      await new Promise((resolver) =>
+        setTimeout(resolver, Math.min(Math.max(esperaRetry, 1000), MAX_ESPERA_RETRY_MS)))
+    }
+    if (!resposta) throw new Error("A requisição externa não foi iniciada")
+    if (!resposta.ok) throw new Error(`A fonte respondeu HTTP ${resposta.status}`)
+    const dados = await resposta.json() as T
+
+    for (const [chave, item] of cacheRespostas) {
+      if (item.expira <= Date.now()) cacheRespostas.delete(chave)
+    }
+    if (cacheRespostas.size >= MAX_ITENS_CACHE) {
+      const maisAntiga = cacheRespostas.keys().next()
+      if (!maisAntiga.done) cacheRespostas.delete(maisAntiga.value)
+    }
+    cacheRespostas.set(url, { expira: Date.now() + TEMPO_CACHE_MS, dados: clonar(dados) })
+    return dados
+  })
+  filaRequisicoes = requisicao.then(() => undefined, () => undefined)
+  return requisicao as Promise<T>
+}
 
 // Formato da resposta: a API garante que a IA devolve exatamente este JSON
 const FORMATO = {
@@ -32,11 +106,9 @@ const FORMATO = {
         additionalProperties: false,
       },
     },
-    chance_acerto: { type: "integer" },
-    chance_conhecimento: { type: "integer" },
     justificativa_geral: { type: "string" },
   },
-  required: ["avaliacoes", "chance_acerto", "chance_conhecimento", "justificativa_geral"],
+  required: ["avaliacoes", "justificativa_geral"],
   additionalProperties: false,
 }
 
@@ -48,13 +120,12 @@ const FORMATO_PERGUNTA = {
     resposta: { type: "string" },
     indice_fonte: { type: "integer" },
     trecho: { type: "string" },
-    chance_acerto: { type: "integer" },
   },
-  required: ["encontrada", "resposta", "indice_fonte", "trecho", "chance_acerto"],
+  required: ["encontrada", "resposta", "indice_fonte", "trecho"],
   additionalProperties: false,
 }
 
-const INSTRUCOES = `Você é o verificador de fatos do Ptolomy.AI, um projeto acadêmico de checagem de fatos.
+const INSTRUCOES = `Você é o assistente de análise de evidências do Ptolomy.AI, um projeto acadêmico de letramento em IA.
 
 Você recebe uma afirmação e trechos de artigos da Wikipédia em português, numerados. Para cada fonte, decida a posição dela em relação à afirmação, usando só o texto daquela fonte:
 - "confirma": o texto sustenta a afirmação.
@@ -65,11 +136,7 @@ Julgue pelo que o texto diz, não pelo seu conhecimento próprio: se a fonte nã
 
 Em "trecho", copie do texto da fonte a frase que sustenta a sua decisão, sem alterar; para "neutra", deixe vazio. Em "justificativa", explique em uma frase curta, em português, por que a fonte confirma, contradiz ou é neutra. Devolva uma avaliação para cada fonte recebida, com o mesmo número.
 
-Por fim, em "chance_acerto", dê um número de 0 a 100 para a chance de a afirmação estar correta segundo essas fontes: perto de 100 quando as fontes confirmam com clareza, perto de 0 quando contradizem com clareza, e perto de 50 quando não dá para decidir.
-
-Em "chance_conhecimento", dê de 0 a 100 a chance de a afirmação ser verdadeira segundo o seu próprio conhecimento, sem olhar as fontes. O site só usa esse número quando nenhuma fonte confirma nem contradiz, e avisa o usuário que ele não tem confirmação nas fontes. Afirmações inventadas ou exageradas, típicas de alucinação de IA, devem receber número baixo.
-
-Em "justificativa_geral", explique em uma ou duas frases, em português, se a afirmação parece verdadeira ou alucinação e por quê. Se nenhuma fonte trata do assunto, diga isso e explique o que o seu conhecimento indica.`
+Em "justificativa_geral", resuma em uma ou duas frases o que as fontes consultadas sustentam, contradizem ou não permitem concluir. Não use conhecimento externo às fontes.`
 
 const INSTRUCOES_PERGUNTA = `Você é o assistente de pesquisa do Ptolomy.AI, um projeto acadêmico de checagem de fatos.
 
@@ -78,21 +145,11 @@ Você recebe uma pergunta e trechos de artigos da Wikipédia em português, nume
 - Se algum trecho traz a resposta, ponha "encontrada" como true, indique em "indice_fonte" o número da fonte usada e copie em "trecho" a frase dela que traz a resposta, sem alterar.
 - Se nenhum trecho traz a resposta, responda com o seu conhecimento, ponha "encontrada" como false, use -1 em "indice_fonte" e deixe "trecho" vazio. O site avisa o usuário que essa resposta não tem fonte.
 
-Em "chance_acerto", dê de 0 a 100 a chance de a sua resposta estar correta: alta quando um trecho diz a resposta com todas as letras, mais baixa quando você precisou deduzir ou respondeu sem fonte, e baixa quando a pergunta não tem resposta clara.`
+`
 
-type Fonte = { titulo: string; descricao: string; url: string }
 type Avaliacao = { indice: number; posicao: "confirma" | "contradiz" | "neutra"; trecho: string; justificativa: string }
-type Julgamento = { avaliacoes: Avaliacao[]; chance_acerto: number; chance_conhecimento: number; justificativa_geral: string }
-type RespostaIA = { encontrada: boolean; resposta: string; indice_fonte: number; trecho: string; chance_acerto: number }
-
-const limitar = (n: number, min: number, max: number) => Math.min(max, Math.max(min, Math.round(n)))
-
-// Margem de erro (em pontos) da chance de acerto. Regra fixa e explicável:
-// começa em 35 e cai 10 para cada fonte que confirma ou contradiz (mínimo 5);
-// sobe 15 quando as fontes discordam entre si. Fica sempre entre 5 e 40.
-function calcularMargem(decisivas: number, discordam: boolean): number {
-  return limitar(35 - 10 * decisivas + (discordam ? 15 : 0), 5, 40)
-}
+type Julgamento = { avaliacoes: Avaliacao[]; justificativa_geral: string }
+type RespostaIA = { encontrada: boolean; resposta: string; indice_fonte: number; trecho: string }
 
 // Mesmo critério do comparador.py: o ponto antes de um dígito ("5.571") não fecha a frase
 function separarFrases(texto: string): string[] {
@@ -112,42 +169,318 @@ function separarFrases(texto: string): string[] {
 }
 
 function palavrasChave(afirmacao: string): string[] {
-  const palavras = afirmacao.toLowerCase().match(/[a-zA-ZÀ-ÿ]+/g) ?? []
-  return palavras.filter((p) => !PALAVRAS_IGNORADAS.has(p))
+  const palavras = afirmarNormalizado(afirmacao).match(/[a-z]+/g) ?? []
+  return [...new Set(palavras.filter((p) => !PALAVRAS_IGNORADAS.has(p) && !PALAVRAS_NUMERICAS.has(p)))]
 }
 
-async function buscarFontes(afirmacao: string): Promise<Fonte[]> {
-  const termo = palavrasChave(afirmacao).join(" ")
-  if (!termo) return []
+function afirmarNormalizado(texto: string): string {
+  return texto.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+}
 
+function entidadeDaCapital(afirmacao: string): string | null {
+  const normalizada = afirmarNormalizado(afirmacao).replace(/[.!?;:]+$/, "").trim()
+  const direta = normalizada.match(/\bcapital\s+(?:do|da|de)\s+(.+?)\s+(?:e|eh)\s+(.+)$/)
+  if (direta) return direta[1].replace(/^(?:o|a|os|as)\s+/, "").trim()
+  const inversa = normalizada.match(/^(.+?)\s+(?:e|eh)\s+(?:a\s+)?capital(?:\s+federal)?\s+(?:do|da|de)\s+(.+)$/)
+  return inversa ? inversa[2].replace(/^(?:o|a|os|as)\s+/, "").trim() : null
+}
+
+function valorDaCapital(afirmacao: string): string | null {
+  const normalizada = afirmarNormalizado(afirmacao).replace(/[.!?;:]+$/, "").trim()
+  const direta = normalizada.match(/\bcapital\s+(?:do|da|de)\s+(.+?)\s+(?:e|eh)\s+(.+)$/)
+  if (direta) return direta[2].trim()
+  const inversa = normalizada.match(/^(.+?)\s+(?:e|eh)\s+(?:a\s+)?capital(?:\s+federal)?\s+(?:do|da|de)\s+(.+)$/)
+  return inversa ? inversa[1].trim() : null
+}
+
+function termosBusca(afirmacao: string): Set<string> {
+  const termos = termosNormalizados(afirmacao)
+  const entidade = entidadeDaCapital(afirmacao)
+  const valor = valorDaCapital(afirmacao)
+  if (entidade && valor) {
+    const termosEntidade = termosNormalizados(entidade)
+    for (const termo of termosNormalizados(valor)) {
+      if (!termosEntidade.has(termo)) termos.delete(termo)
+    }
+  }
+  return termos
+}
+
+function gerarConsultas(afirmacao: string): string[] {
+  const termos = palavrasChave(afirmacao)
+  if (!termos.length) return []
+
+  const consultas = [termos.join(" ")]
+  const conceitosEstado = new Set(["estado", "estados", "federativa", "federativas", "distrito", "federal", "uf"])
+  const conceitosAssunto = new Set([
+    "capital", "capitais", "satelite", "satelites", "natural", "naturais",
+    "composicao", "composta", "composto", "hidrogenio", "oxigenio",
+    "elemento", "elementos",
+  ])
+  const falaDeEstados = termos.some((termo) => conceitosEstado.has(termo))
+  const entidade = termos.find((termo) => !conceitosEstado.has(termo) && !conceitosAssunto.has(termo))
+  if (falaDeEstados && entidade) {
+    consultas.push(`estados do ${entidade}`, `unidades federativas do ${entidade}`)
+  }
+  if ((termos.includes("capital") || termos.includes("capitais")) && entidade) {
+    consultas.push(`capital do ${entidade}`)
+  }
+  if (termos.some((termo) => ["satelite", "satelites"].includes(termo))) {
+    consultas.push(entidade ? `satelites naturais da ${entidade}` : "satelites naturais")
+  }
+  if (termos.some((termo) => ["composicao", "composta", "composto", "hidrogenio", "oxigenio"].includes(termo))) {
+    consultas.push(`composicao ${termos.join(" ")}`)
+  }
+  return [...new Set(consultas.map((consulta) => consulta.trim().replace(/\s+/g, " ")))]
+    .slice(0, MAX_CONSULTAS_WIKIPEDIA)
+}
+
+function termosNormalizados(texto: string): Set<string> {
+  return new Set(afirmarNormalizado(texto).match(/[a-z0-9]+/g) ?? [])
+}
+
+function relevancia(pagina: Pagina, termosAfirmacao: Set<string>, consultas: string[], falaDeEstados: boolean): number {
+  const termosTitulo = termosNormalizados(pagina.title)
+  const termosTexto = termosNormalizados(pagina.extract ?? "")
+  let pontos = 5 * [...termosAfirmacao].filter((termo) => termosTitulo.has(termo)).length
+    + 2 * [...termosAfirmacao].filter((termo) => termosTexto.has(termo)).length
+  const titulo = afirmarNormalizado(pagina.title)
+  if (falaDeEstados && titulo.includes("unidades federativas") && titulo.includes("brasil")) pontos += 20
+  if (falaDeEstados && titulo.includes("estados do brasil")) pontos += 15
+  if (/\b(?:18|19|20)\d{2}\s*[-–—]\s*(?:18|19|20)?\d{0,4}\b/.test(titulo)
+    || ["historico", "historia do", "extinto"].some((termo) => titulo.includes(termo))) pontos -= 25
+  if (titulo.includes("lista de")) pontos -= 15
+  if (falaDeEstados && titulo.startsWith("estado do brasil")) pontos -= 20
+  if (falaDeEstados && titulo.includes("distrito federal") && !titulo.includes("brasil")) pontos -= 8
+  if (consultas.some((consulta) => consulta.includes("unidades federativas do brasil"))
+    && titulo.includes("unidades federativas")) pontos += 10
+  return pontos
+}
+
+async function buscarPaginasWikipedia(consulta: string): Promise<Pagina[]> {
   const parametros = new URLSearchParams({
     action: "query",
     generator: "search",
-    gsrsearch: termo,
-    gsrlimit: "3",
+    gsrsearch: consulta,
+    gsrnamespace: "0",
+    gsrlimit: String(MAX_RESULTADOS_POR_CONSULTA),
     prop: "extracts",
+    exlimit: "max",
     exintro: "1",
     explaintext: "1",
+    exchars: String(MAX_CARACTERES_EXCERTO),
     format: "json",
   })
+  const dados = await obterJson<{ query?: { pages?: Record<string, Pagina> } }>(
+    `${URL_WIKIPEDIA}?${parametros}`,
+  )
+  return Object.values(dados.query?.pages ?? {})
+}
 
-  const resposta = await fetch(`${URL_WIKIPEDIA}?${parametros}`, {
-    headers: { "User-Agent": "ProjetoPtolomy/1.0 (projeto academico)" },
-    signal: AbortSignal.timeout(10000),
+async function completarExtratos(paginas: Pagina[]): Promise<void> {
+  const ids = paginas
+    .filter((pagina) => !pagina.extract)
+    .map((pagina) => String(pagina.pageid))
+    .slice(0, MAX_EXTRATOS_POR_LOTE)
+  if (!ids.length) return
+
+  const parametros = new URLSearchParams({
+    action: "query",
+    pageids: ids.join("|"),
+    prop: "extracts",
+    exlimit: "max",
+    exintro: "1",
+    explaintext: "1",
+    exchars: String(MAX_CARACTERES_EXCERTO),
+    format: "json",
   })
-  if (!resposta.ok) throw new Error(`Wikipédia respondeu ${resposta.status}`)
+  const dados = await obterJson<{ query?: { pages?: Record<string, Pagina> } }>(
+    `${URL_WIKIPEDIA}?${parametros}`,
+  )
+  for (const pagina of paginas) {
+    const extraida = dados.query?.pages?.[String(pagina.pageid)]
+    if (extraida?.extract) pagina.extract = extraida.extract
+  }
+}
 
-  const dados = await resposta.json()
-  if (!dados.query) return []
+async function buscarUfsIBGE(afirmacao: string): Promise<Fonte | null> {
+  const termos = palavrasChave(afirmacao)
+  const falaDeEstados = termos.some((termo) =>
+    ["estado", "estados", "federativa", "federativas", "distrito", "federal", "uf"].includes(termo))
+  if (!falaDeEstados || !termos.some((termo) => ["brasil", "brasileiro", "brasileira"].includes(termo))) return null
 
-  const paginas = Object.values(dados.query.pages) as Array<{ pageid: number; title: string; index: number; extract?: string }>
-  paginas.sort((a, b) => a.index - b.index)
+  try {
+    const unidades = await obterJson<Array<{ sigla?: string; nome?: string }>>(URL_IBGE_UFS)
+    const validas = unidades.filter((unidade) => typeof unidade.sigla === "string" && typeof unidade.nome === "string")
+    if (!validas.length) throw new Error("Formato de resposta do IBGE inválido")
+    const distritoFederal = validas.find((unidade) => unidade.sigla?.toUpperCase() === "DF")
+    const estados = validas.filter((unidade) => unidade.sigla?.toUpperCase() !== "DF")
+    let descricao = `A API de Localidades do IBGE lista ${validas.length} unidades da Federação do Brasil, incluindo ${estados.length} estados`
+    if (distritoFederal) descricao += ` e o Distrito Federal (${distritoFederal.sigla})`
+    descricao += `. Unidades listadas: ${validas.map((unidade) => `${unidade.nome} (${unidade.sigla})`).sort().join(", ")}.`
+    return {
+      titulo: "Unidades da Federação do Brasil — IBGE (API de Localidades)",
+      descricao,
+      url: URL_IBGE_UFS,
+      tipo_fonte: "oficial",
+    }
+  } catch (error) {
+    console.warn("API de Localidades do IBGE indisponível:", error instanceof Error ? error.name : "erro desconhecido")
+    return null
+  }
+}
 
-  return paginas.map((p) => ({
-    titulo: p.title,
-    descricao: (p.extract ?? "").slice(0, 500),
-    url: `https://pt.wikipedia.org/?curid=${p.pageid}`,
-  }))
+async function buscarCapitalWikidata(afirmacao: string): Promise<Fonte | null> {
+  const entidade = entidadeDaCapital(afirmacao)
+  if (!entidade) return null
+
+  try {
+    const parametrosBusca = new URLSearchParams({
+      action: "wbsearchentities",
+      search: entidade,
+      language: "pt",
+      format: "json",
+      limit: "10",
+    })
+    const busca = await obterJson<{
+      search?: Array<{
+        id?: string
+        label?: string
+        aliases?: string[]
+        match?: { text?: string }
+      }>
+    }>(`${URL_WIKIDATA}?${parametrosBusca}`)
+    const normalizada = afirmarNormalizado(entidade)
+    const resultado = busca.search?.find((item) =>
+      afirmarNormalizado(item.match?.text ?? "") === normalizada
+      || afirmarNormalizado(item.label ?? "") === normalizada
+      || item.aliases?.some((alias) => afirmarNormalizado(alias) === normalizada))
+    if (!resultado?.id) return null
+
+    type Declaracao = {
+      rank?: string
+      qualifiers?: Record<string, unknown>
+      mainsnak?: { datavalue?: { type?: string; value?: { id?: string } } }
+    }
+    const parametrosEntidade = new URLSearchParams({
+      action: "wbgetentities",
+      ids: resultado.id,
+      props: "labels|claims",
+      languages: "pt|en",
+      format: "json",
+    })
+    const dados = await obterJson<{
+      entities?: Record<string, {
+        labels?: Record<string, { value?: string }>
+        claims?: Record<string, Declaracao[]>
+      }>
+    }>(`${URL_WIKIDATA}?${parametrosEntidade}`)
+    const entidadeDados = dados.entities?.[resultado.id]
+    const declaracoes = entidadeDados?.claims?.P36 ?? []
+    const preferidas = declaracoes.filter((declaracao) => declaracao.rank === "preferred")
+    const atuais = preferidas.length
+      ? preferidas
+      : declaracoes.filter((declaracao) => !declaracao.qualifiers?.P582)
+    const capitaisIds = [...new Set(atuais
+      .filter((declaracao) => declaracao.mainsnak?.datavalue?.type === "wikibase-entityid")
+      .map((declaracao) => declaracao.mainsnak?.datavalue?.value?.id)
+      .filter((id): id is string => Boolean(id)))]
+    if (!capitaisIds.length) return null
+
+    const parametrosRotulos = new URLSearchParams({
+      action: "wbgetentities",
+      ids: [resultado.id, ...capitaisIds].join("|"),
+      props: "labels",
+      languages: "pt|en",
+      format: "json",
+    })
+    const rotulos = await obterJson<{
+      entities?: Record<string, { labels?: Record<string, { value?: string }> }>
+    }>(`${URL_WIKIDATA}?${parametrosRotulos}`)
+    const rotuloEntidade = entidadeDados?.labels?.pt?.value
+      ?? entidadeDados?.labels?.en?.value
+      ?? resultado.label
+      ?? entidade
+    const capitais = capitaisIds
+      .map((id) => rotulos.entities?.[id]?.labels?.pt?.value ?? rotulos.entities?.[id]?.labels?.en?.value)
+      .filter((rotulo): rotulo is string => Boolean(rotulo))
+    if (!capitais.length) return null
+
+    return {
+      titulo: `${rotuloEntidade} — Wikidata`,
+      descricao: `Registro estruturado do Wikidata (propriedade P36): ${capitais.map((capital) => `A capital do ${rotuloEntidade} é ${capital}.`).join(" ")}`,
+      url: `https://www.wikidata.org/wiki/${resultado.id}`,
+      tipo_fonte: "base_dados_aberta",
+    }
+  } catch (error) {
+    console.warn("Propriedade de capital do Wikidata indisponível:", error instanceof Error ? error.name : "erro desconhecido")
+    return null
+  }
+}
+
+async function buscarFontes(afirmacao: string): Promise<Fonte[]> {
+  const consultas = gerarConsultas(afirmacao)
+  if (!consultas.length) return []
+
+  const termos = palavrasChave(afirmacao)
+  const termosRankeados = termosBusca(afirmacao)
+  const falaDeEstados = termos.some((termo) =>
+    ["estado", "estados", "federativa", "federativas", "distrito", "federal", "uf"].includes(termo))
+  const fontesPorId = new Map<number, Pagina>()
+  const fontesAdicionais = [
+    await buscarUfsIBGE(afirmacao),
+    await buscarCapitalWikidata(afirmacao),
+  ].filter((fonte): fonte is Fonte => fonte !== null)
+  let falhaWikipedia: unknown = null
+  for (const consulta of consultas) {
+    let paginas: Pagina[]
+    try {
+      paginas = await buscarPaginasWikipedia(consulta)
+    } catch (error) {
+      falhaWikipedia = error
+      console.warn("Pesquisa na Wikipédia indisponível:", error instanceof Error ? error.name : "erro desconhecido")
+      break
+    }
+    for (const pagina of paginas) {
+      const anterior = fontesPorId.get(pagina.pageid)
+      if (!anterior || relevancia(pagina, termosRankeados, consultas, falaDeEstados)
+        > relevancia(anterior, termosRankeados, consultas, falaDeEstados)) {
+        fontesPorId.set(pagina.pageid, pagina)
+      }
+    }
+  }
+
+  const paginas = [...fontesPorId.values()].sort((a, b) =>
+    relevancia(b, termosRankeados, consultas, falaDeEstados)
+      - relevancia(a, termosRankeados, consultas, falaDeEstados)
+    || (a.index ?? 999) - (b.index ?? 999)
+    || a.title.localeCompare(b.title))
+  await completarExtratos(paginas)
+  let listasAdicionadas = 0
+  const wikis = paginas
+    .filter((pagina) => pagina.extract?.trim())
+    .sort((a, b) =>
+      relevancia(b, termosRankeados, consultas, falaDeEstados)
+        - relevancia(a, termosRankeados, consultas, falaDeEstados)
+      || (a.index ?? 999) - (b.index ?? 999)
+      || a.title.localeCompare(b.title))
+    .filter((pagina) => {
+      if (!afirmarNormalizado(pagina.title).startsWith("lista de")) return true
+      listasAdicionadas++
+      return listasAdicionadas === 1
+    })
+    .slice(0, MAX_FONTES)
+    .map((pagina) => ({
+      titulo: pagina.title,
+      descricao: pagina.extract!.slice(0, MAX_CARACTERES_EXCERTO),
+      url: `https://pt.wikipedia.org/?curid=${pagina.pageid}`,
+      tipo_fonte: "enciclopedia",
+    }))
+
+  const limiteWikipedia = MAX_FONTES - fontesAdicionais.length
+  const fontes = [...fontesAdicionais, ...wikis.slice(0, limiteWikipedia)]
+  if (!fontes.length && falhaWikipedia) throw falhaWikipedia
+  return fontes
 }
 
 function montarPedido(afirmacao: string, fontes: Fonte[]): string {
@@ -182,64 +515,69 @@ async function perguntarIA<T>(cliente: Anthropic, instrucoes: string, formato: {
 async function avaliarFontes(cliente: Anthropic, afirmacao: string, fontes: Fonte[]): Promise<Julgamento | null> {
   if (fontes.length === 0) return null
 
-  const julgamento = await perguntarIA<Julgamento>(cliente, INSTRUCOES, FORMATO, montarPedido(afirmacao, fontes))
+  let julgamento: Julgamento | null
+  try {
+    julgamento = await perguntarIA<Julgamento>(cliente, INSTRUCOES, FORMATO, montarPedido(afirmacao, fontes))
+  } catch (error) {
+    if (!(error instanceof Anthropic.APIError)) throw error
+    console.warn("Análise por IA indisponível; fontes consultadas serão exibidas sem classificação.", error.status)
+    return null
+  }
   if (!julgamento) return null
 
   return {
     avaliacoes: julgamento.avaliacoes.filter((a) => a.indice >= 0 && a.indice < fontes.length),
-    chance_acerto: limitar(julgamento.chance_acerto, 0, 100),
-    chance_conhecimento: limitar(julgamento.chance_conhecimento, 0, 100),
     justificativa_geral: julgamento.justificativa_geral,
   }
 }
 
-async function responderPergunta(cliente: Anthropic, pergunta: string) {
+async function responderPergunta(cliente: Anthropic | null, pergunta: string) {
   const fontes = await buscarFontes(pergunta)
-  // Mesmo sem fontes da Wikipédia, a IA ainda é chamada para responder (sem fonte)
   const semResposta = {
     pergunta,
     encontrada: false,
-    resposta: "As fontes consultadas não trazem essa informação.",
+    resposta: "Não foi possível gerar uma resposta com apoio confirmado nas fontes consultadas.",
     fonte: null as null | { titulo: string; url: string },
     trecho: "",
-    chance_acerto: 0,
-    margem: 40,
-    base: "conhecimento" as "fontes" | "conhecimento",
   }
 
+  if (!cliente) return semResposta
   const pedido = montarPedido(pergunta, fontes).replace(/^<afirmacao>(.*)<\/afirmacao>/, "<pergunta>$1</pergunta>")
   const r = await perguntarIA<RespostaIA>(cliente, INSTRUCOES_PERGUNTA, FORMATO_PERGUNTA, pedido)
   if (!r) return semResposta
 
   const fonte = r.encontrada ? fontes[r.indice_fonte] : undefined
   if (!fonte) {
-    // A IA respondeu sem apoio nas fontes: a resposta aparece, mas com margem máxima
-    return { ...semResposta, resposta: r.resposta, chance_acerto: limitar(r.chance_acerto, 0, 100) }
+    return { ...semResposta, resposta: r.resposta }
   }
 
+  const trechoValido = !!r.trecho.trim() && fonte.descricao.includes(r.trecho.trim())
   return {
     pergunta,
-    encontrada: true,
+    encontrada: trechoValido,
     resposta: r.resposta,
-    fonte: { titulo: fonte.titulo, url: fonte.url },
-    trecho: r.trecho,
-    chance_acerto: limitar(r.chance_acerto, 0, 100),
-    // A resposta vem de uma fonte só: margem de uma fonte decisiva
-    margem: calcularMargem(1, false),
-    base: "fontes" as "fontes" | "conhecimento",
+    fonte: trechoValido ? { titulo: fonte.titulo, url: fonte.url } : null,
+    trecho: trechoValido ? r.trecho : "",
   }
 }
 
 function montarEvidencias(avaliacoes: Avaliacao[], fontes: Fonte[]) {
   return avaliacoes.map((a) => {
     const fonte = fontes[a.indice]
+    const trecho = a.trecho.trim()
+    const trechoValido = !!trecho && fonte.descricao.includes(trecho)
     return {
       titulo: fonte.titulo,
       url: fonte.url,
-      posicao: a.posicao,
-      // Sem trecho (fonte neutra), mostra o começo do resumo do artigo
-      trecho: a.trecho.trim() || fonte.descricao.slice(0, 200),
-      justificativa: a.justificativa,
+      tipo_fonte: fonte.tipo_fonte ?? "enciclopedia",
+      posicao: trechoValido ? a.posicao : "neutra",
+      comparada: trechoValido,
+      trecho: trechoValido ? trecho : fonte.descricao.slice(0, 200),
+      justificativa: trechoValido
+        ? a.justificativa
+        : trecho
+          ? "O trecho atribuído à fonte não pôde ser confirmado no conteúdo consultado."
+          : a.justificativa,
     }
   })
 }
@@ -300,9 +638,8 @@ export default async (req: Request) => {
   }
 
   const conexao = escolherConexao()
-  if (!conexao) return erro(503, "Nenhuma chave de IA disponível: configure ANTHROPIC_API_KEY ou ative o AI Gateway do Netlify")
-  const cliente = new Anthropic({ ...conexao.opcoes, timeout: 45000, maxRetries: 1 })
-  const origem = conexao.origem
+  const cliente = conexao ? new Anthropic({ ...conexao.opcoes, timeout: 45000, maxRetries: 1 }) : null
+  const origem = conexao?.origem ?? null
 
   const frases = separarFrases(texto)
   const perguntas = frases.filter((f) => f.endsWith("?")).slice(0, MAX_AFIRMACOES)
@@ -314,25 +651,26 @@ export default async (req: Request) => {
       Promise.all(
         afirmacoesTexto.map(async (frase, i) => {
           const fontes = await buscarFontes(frase)
-          const julgamento = await avaliarFontes(cliente, frase, fontes)
-          const avaliacoes = julgamento?.avaliacoes ?? []
-          const confirmam = avaliacoes.filter((a) => a.posicao === "confirma").length
-          const contradizem = avaliacoes.filter((a) => a.posicao === "contradiz").length
-          const decisivas = confirmam + contradizem
-
-          // Veracidade: vem das fontes quando alguma confirma ou contradiz; senão, do conhecimento
-          // da IA (sem confirmação nas fontes, margem máxima). Sem julgamento nenhum, fica em 50.
-          let base: "fontes" | "conhecimento" | "nenhuma" = "nenhuma"
-          let chance = 50
-          let margem = 40
-          if (julgamento && decisivas > 0) {
-            base = "fontes"
-            chance = julgamento.chance_acerto
-            margem = calcularMargem(decisivas, confirmam > 0 && contradizem > 0)
-          } else if (julgamento) {
-            base = "conhecimento"
-            chance = julgamento.chance_conhecimento
-          }
+          const julgamento = cliente ? await avaliarFontes(cliente, frase, fontes) : null
+          const avaliacoes = julgamento?.avaliacoes ?? fontes.map((_, indice) => ({
+            indice,
+            posicao: "neutra" as const,
+            trecho: "",
+            justificativa: cliente
+              ? "Fonte consultada, mas não classificada porque a análise por IA não ficou disponível."
+              : "Fonte consultada, mas não classificada porque a análise por IA não está configurada.",
+          }))
+          const avaliados = new Set(avaliacoes.map((avaliacao) => avaliacao.indice))
+          fontes.forEach((_, indice) => {
+            if (!avaliados.has(indice)) {
+              avaliacoes.push({
+                indice,
+                posicao: "neutra",
+                trecho: "",
+                justificativa: "Fonte consultada, mas não foi possível validar uma classificação para ela.",
+              })
+            }
+          })
 
           return {
             id: i + 1,
@@ -340,11 +678,9 @@ export default async (req: Request) => {
             status_verificacao: "concluida",
             fontes,
             evidencias: montarEvidencias(avaliacoes, fontes),
-            chance_acerto: chance,
-            margem,
-            base,
-            justificativa_geral: julgamento?.justificativa_geral ?? "Não foi possível avaliar esta afirmação com as fontes encontradas.",
-            metodo: "ia",
+            justificativa_geral: julgamento?.justificativa_geral
+              ?? (cliente ? "A análise automática não ficou disponível; as fontes foram consultadas, mas não classificadas." : "Apenas os resumos das fontes foram consultados. Configure uma chave de IA para classificá-los."),
+            metodo: julgamento ? "ia" : "sem_ia",
           }
         }),
       ),
@@ -360,6 +696,7 @@ export default async (req: Request) => {
       quantidade_afirmacoes: afirmacoes.length,
       quantidade_perguntas: perguntas.length,
       conexao_ia: origem,
+      metodo: cliente ? "ia" : "sem_ia",
     })
   } catch (e) {
     if (e instanceof Anthropic.APIError) {

@@ -15,10 +15,13 @@ type Analise = {
   status_validacao: string
   observacao: string
   data: string
+  conclusao_usuario: string
+  fontes_consultadas: string[]
 }
 
 const loja = () => getStore({ name: "analises", consistency: "strong" })
 const erro = (status: number, detail: string) => Response.json({ detail }, { status })
+const CONCLUSOES_USUARIO_VALIDAS = ["", "confirmada", "contradita", "evidencias_insuficientes", "necessita_pesquisa"]
 
 async function lerCorpo(req: Request): Promise<Record<string, unknown> | null> {
   try {
@@ -64,6 +67,8 @@ async function cadastrar(req: Request): Promise<Response> {
       status_validacao: "não verificado",
       observacao: "",
       data: new Date().toISOString().slice(0, 19),
+      conclusao_usuario: "",
+      fontes_consultadas: [],
     }
     const { modified } = await analises.setJSON(String(id), analise, { onlyIfNew: true })
     if (modified) return Response.json(analise, { status: 201 })
@@ -100,11 +105,29 @@ export default async (req: Request, context: Context) => {
 
     const status = String(dados.status_validacao ?? "")
     const observacao = String(dados.observacao ?? "")
+    const conclusaoUsuario = dados.conclusao_usuario
+    const fontesConsultadas = dados.fontes_consultadas
 
     if (!STATUS_VALIDOS.includes(status)) return erro(400, "Status inválido")
     if (observacao.length > 500) return erro(422, "A observação pode ter no máximo 500 caracteres")
+    if (conclusaoUsuario !== undefined && (typeof conclusaoUsuario !== "string" || !CONCLUSOES_USUARIO_VALIDAS.includes(conclusaoUsuario))) {
+      return erro(400, "Conclusão do usuário inválida")
+    }
+    if (fontesConsultadas !== undefined && (
+      !Array.isArray(fontesConsultadas)
+      || fontesConsultadas.length > 20
+      || fontesConsultadas.some((fonte) => typeof fonte !== "string" || fonte.length > 100)
+    )) {
+      return erro(422, "Lista de fontes consultadas inválida")
+    }
 
-    const atualizada = { ...atual, status_validacao: status, observacao }
+    const atualizada = {
+      ...atual,
+      status_validacao: status,
+      observacao,
+      ...(conclusaoUsuario !== undefined ? { conclusao_usuario: conclusaoUsuario } : {}),
+      ...(fontesConsultadas !== undefined ? { fontes_consultadas: fontesConsultadas } : {}),
+    }
     await analises.setJSON(id, atualizada)
     return Response.json(atualizada)
   }

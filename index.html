@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ptolomy.AI — Checagem de fatos</title>
-<meta name="description" content="Ptolomy.AI: plataforma acadêmica de checagem de fatos que verifica afirmações e respostas de IA, com score de confiabilidade e evidências.">
+<meta name="description" content="Ptolomy.AI: questione respostas de IA, confira fontes e pratique verificação cruzada com autonomia.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='38' r='20' fill='%23f3e6c4' stroke='%230f1f3d' stroke-width='3'/%3E%3Cpath d='M8 20 32 10 56 20 32 30Z' fill='%230f1f3d'/%3E%3Ccircle cx='39' cy='38' r='6' fill='none' stroke='%23c9a227' stroke-width='3'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -169,6 +169,14 @@ blockquote.texto{margin:0 0 4px;padding:12px 14px;border-left:4px solid var(--go
 .pos-tag{font-weight:700;font-size:.82rem;display:inline-flex;gap:5px;align-items:center}
 .pos-tag.confirma{color:var(--t-verde)}.pos-tag.contradiz{color:var(--t-vermelho)}.pos-tag.neutra{color:var(--muted)}
 .nota{font-size:.84rem;color:var(--muted);border-top:1px solid var(--line);padding-top:12px;margin-top:14px}
+.pesquisa-lista{list-style:none;padding:0;margin:12px 0;display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}
+.pesquisa-item{display:flex;align-items:flex-start;gap:9px;padding:12px;border:1px solid var(--line);border-radius:10px;background:#fff}
+.pesquisa-item input{width:auto;min-height:auto;margin-top:4px;accent-color:var(--navy)}
+.pesquisa-item label{display:block;font-weight:600}
+.pesquisa-item a{display:inline-block;margin-top:3px;font-weight:600}
+.crosscheck-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px}
+.crosscheck-actions label{margin:0}
+.crosscheck-actions select{max-width:480px}
 
 /* Skeleton */
 .skeleton{background:linear-gradient(90deg,#ece9e0 25%,#f6f4ee 50%,#ece9e0 75%);background-size:200% 100%;animation:sk 1.2s infinite linear;border-radius:8px}
@@ -273,9 +281,8 @@ dl.info dd{margin:0;overflow-wrap:anywhere}
    Ptolomy.AI — protótipo acadêmico (front-end puro, um único arquivo)
    - Dados salvos no navegador (localStorage), simulando as tabelas:
      usuarios, checagens, evidencias, fontes_confiaveis
-   - O motor de verificação roda em MODO DEMONSTRAÇÃO, com uma base local
-     de afirmações e fontes. A camada "Motor" é isolada para ser trocada
-     depois por uma API real (ex.: backend em Python + Supabase).
+   - As contas e preferências ficam no navegador; verificações e análises
+     são solicitadas ao backend local ou às funções do Netlify.
    ========================================================================= */
 (() => {
 
@@ -341,7 +348,7 @@ const DB = {
   }
 };
 
-const TIPOS_FONTE = { oficial: 'Oficial', academica: 'Acadêmica', imprensa: 'Imprensa', outra: 'Outra' };
+const TIPOS_FONTE = { oficial: 'Oficial', academica: 'Acadêmica', imprensa: 'Imprensa', enciclopedia: 'Enciclopédia', base_dados_aberta: 'Base de dados aberta', outra: 'Outra' };
 const PESO_PADRAO = { oficial: 30, academica: 20, imprensa: 15, outra: 5 };
 
 const FONTES_PADRAO = [
@@ -376,7 +383,7 @@ function urlDaFonte(f) {
 const urlSegura = u => { try { const x = new URL(u); return x.protocol === 'https:' ? x.href : null; } catch (e) { return null; } };
 
 /* ---------- Motor de verificação ----------
-   Primeiro procura na base de demonstração; se não achar, chama o backend em Python. */
+   Resultados apresentados ao usuário sempre vêm de fontes consultadas pela API. */
 // Backend: no seu computador é o Python (uvicorn main:app); no site publicado no Netlify
 // são as funções do próprio site (netlify/functions), no mesmo endereço.
 const API_LOCAL = ['localhost', '127.0.0.1', ''].includes(location.hostname) && location.port !== '8888';
@@ -504,12 +511,16 @@ const Motor = {
   async verificar(texto, manual) {
     if (DB.data.config.simularFalha) { const e = new Error('Serviço de fontes indisponível'); e.codigo = 'INDISPONIVEL'; throw e; }
     const agora = agoraISO();
-    const r = this.analisar(texto, manual, agora);
-    if (r.evidencias.length) return r; // afirmação já conhecida na base de demonstração
+    const cls = this.classificar(texto, manual);
+    const temas = cls.temas.length ? cls.temas : ['Geral'];
+    const r = {
+      texto,
+      temas,
+      sensiveis: temas.filter(t => SENSIVEIS.includes(t)),
+      confianca: cls.confianca
+    };
 
-    // Senão, o backend em Python busca na Wikipédia
-    const wiki = DB.data.fontes_confiaveis.find(f => f.dominio === 'pt.wikipedia.org' && f.ativa);
-    if (!wiki) return r;
+    // O backend consulta fontes; os exemplos locais não são evidências.
     let dados;
     try {
       const resp = await fetch(API_URL + '/verificar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ texto }) });
@@ -518,50 +529,68 @@ const Motor = {
     } catch (e) {
       const erro = new Error('Serviço de fontes indisponível'); erro.codigo = 'INDISPONIVEL'; throw erro;
     }
-    const evidencias = [];
-    const afirmacoes = dados.afirmacoes || [];
-    const respostas = dados.respostas || [];
-    for (const a of afirmacoes) {
-      for (const e of a.evidencias) {
-        evidencias.push({ fonte_nome: 'Wikipédia — ' + e.titulo, dominio: wiki.dominio, url: e.url, tipo_fonte: wiki.tipo, peso: wiki.peso, posicao: e.posicao, trecho_relevante: e.justificativa ? `“${e.trecho}” — Análise da IA: ${e.justificativa}` : e.trecho, data_consulta: agora });
-      }
-    }
-    const base = calcularScore(evidencias, r.sensiveis);
-
-    // Sem a chance da IA (ex.: backend Python local), vale o score por pesos de fonte
-    const itens = [...afirmacoes, ...respostas].filter(x => typeof x.chance_acerto === 'number');
-    if (!itens.length) return { ...r, ...base, evidencias, respostas };
-
-    // Com a IA: o medidor mostra a chance de estar certa, com margem de erro
-    const media = k => Math.round(itens.reduce((s, x) => s + x[k], 0) / itens.length);
-    const chance = media('chance_acerto'), margem = media('margem');
-    // Sem fonte nenhuma que confirme ou contradiga: a veracidade vem do conhecimento da IA
-    const semFonte = itens.every(x => x.base === 'conhecimento' || x.encontrada === false);
-    let score = chance, bloqueado = false;
-    const fatores = [
-      { texto: semFonte ? 'Veracidade estimada pela IA (as fontes encontradas não tratam do assunto)' : 'Veracidade segundo as fontes, avaliada pela IA', valor: chance, tipo: 'base' },
-      { texto: 'Risco de alucinação (o que falta para 100%)', valor: 100 - chance, tipo: 'risco' },
-      { texto: `Margem de erro: ${base.n_confirma + base.n_contradiz} fonte${base.n_confirma + base.n_contradiz === 1 ? '' : 's'} que confirma${base.n_confirma + base.n_contradiz === 1 ? '' : 'm'} ou contradiz${base.n_confirma + base.n_contradiz === 1 ? '' : 'em'}${base.controversia ? '; as fontes discordam entre si' : ''}${respostas.some(x => !x.encontrada) ? '; há resposta sem fonte' : ''}`, valor: margem, tipo: 'margem' }
-    ];
-    if (r.sensiveis.length && !base.requisito_ok && score >= 70) {
-      bloqueado = true;
-      fatores.push({ texto: 'Tema sensível sem 3 fontes oficiais: selo verde bloqueado', valor: 69 - score, tipo: 'neg' });
-      score = 69;
-    }
-    const cor = score >= 70 ? 'verde' : score >= 40 ? 'amarelo' : 'vermelho';
-    const status = evidencias.length || respostas.length ? 'concluida' : 'inconclusiva';
-    const resumo = [
-      `Veracidade de ${chance}% (risco de alucinação de ${100 - chance}%), com margem de erro de ±${margem} pontos: entre ${Math.max(0, chance - margem)}% e ${Math.min(100, chance + margem)}%.`,
-      ...(semFonte ? ['As fontes encontradas não tratam do assunto, então essa estimativa vem do conhecimento da IA e não tem confirmação nas fontes.'] : []),
-      ...afirmacoes.map(a => a.justificativa_geral).filter(Boolean),
-      ...(bloqueado ? [`Como o tema é sensível (${r.sensiveis.join(' e ')}) e faltam 3 fontes oficiais confirmando, o selo verde foi bloqueado.`] : []),
-      ...(base.controversia ? ['Atenção: as fontes discordam entre si.'] : [])
-    ].join(' ');
-    return { ...r, ...base, score, cor, fatores, bloqueado, status, resumo, margem, metodo: 'ia', sem_fonte: semFonte, evidencias, respostas };
+    return { ...r, ...normalizarVerificacao(dados, r.sensiveis, agora) };
   }
 };
 
 /* ---------- Cálculo do score (determinístico) ---------- */
+const RESULTADOS_API = {
+  compatibilidade_numerica: ['Compatível com as evidências', 'As comparações decisivas sustentam a afirmação.', 'verde'],
+  divergencia_numerica: ['Contradita pelas evidências', 'As comparações decisivas contradizem a afirmação.', 'vermelho'],
+  evidencias_mistas: ['Evidências mistas', 'Há comparações favoráveis e contraditórias. Confira quais pontos cada trecho sustenta.', 'amarelo'],
+  parcial: ['Parcialmente sustentada', 'O texto contém afirmaçães sustentadas e afirmaçães contraditas pelas evidências.', 'amarelo'],
+  inconclusivo: ['Inconclusiva', 'As fontes consultadas ofereceram evidência insuficiente para classificar a afirmação.', 'amarelo']
+};
+const METODOS_API = { numerico: 'Comparador local (números e relações)', ia: 'Avaliação das fontes por IA', sem_ia: 'Consulta de fontes' };
+
+function normalizarVerificacao(dados, sensiveis, agora) {
+  const evidencias = [];
+  const afirmacoes = (dados.afirmacoes || []).map(a => {
+    const contagem = { compativeis: 0, divergentes: 0, inconclusivas: 0 };
+    for (const e of a.evidencias || []) {
+      const url = urlSegura(e.url);
+      const dominio = url ? new URL(url).hostname.replace(/^www\./, '') : '';
+      const pertence = nome => dominio === nome || dominio.endsWith('.' + nome);
+      const ibge = pertence('ibge.gov.br'), wiki = pertence('wikipedia.org'), wikidata = pertence('wikidata.org');
+      const tipo = ibge ? 'oficial' : Object.hasOwn(TIPOS_FONTE, e.tipo_fonte) ? e.tipo_fonte
+        : wiki ? 'enciclopedia' : wikidata ? 'base_dados_aberta' : 'outra';
+      const provedor = ibge ? 'IBGE' : wiki ? 'Wikipédia' : wikidata ? 'Wikidata' : '';
+      const trecho = e.trecho?.trim() || '';
+      const posicao = trecho && ['confirma', 'contradiz'].includes(e.posicao) ? e.posicao : 'neutra';
+      if (posicao === 'confirma') contagem.compativeis++;
+      else if (posicao === 'contradiz') contagem.divergentes++;
+      else if (trecho && a.metodo === 'ia' && e.comparada !== false) contagem.inconclusivas++;
+      evidencias.push({ afirmacao_id: a.id, fonte_nome: [provedor, e.titulo].filter(Boolean).join(' — '),
+        dominio, url, tipo_fonte: tipo, posicao, trecho_relevante: trecho, justificativa: e.justificativa || '',
+        data_consulta: agora });
+    }
+    // No Python, o agregado num?rico descreve o comparador local, mesmo quando a IA avaliou as fontes.
+    const comparacoes = a.metodo === 'numerico' ? (a.resumo_evidencias || contagem) : contagem;
+    const inferido = comparacoes.compativeis && comparacoes.divergentes ? 'evidencias_mistas'
+      : comparacoes.compativeis ? 'compatibilidade_numerica'
+      : comparacoes.divergentes ? 'divergencia_numerica' : 'inconclusivo';
+    const resultado = a.metodo === 'numerico' && Object.hasOwn(RESULTADOS_API, a.resultado_geral)
+      ? a.resultado_geral : inferido;
+    return { id: a.id, texto: a.texto, resultado, comparacoes, metodo: a.metodo,
+      justificativa: a.justificativa_geral || '', diagnostico_ia: a.diagnostico_ia };
+  });
+  const resultados = new Set(afirmacoes.map(a => a.resultado));
+  const n_confirma = evidencias.filter(e => e.posicao === 'confirma').length;
+  const n_contradiz = evidencias.filter(e => e.posicao === 'contradiz').length;
+  const resultado = resultados.has('compatibilidade_numerica') && resultados.has('divergencia_numerica') ? 'parcial'
+    : resultados.has('evidencias_mistas') ? 'evidencias_mistas'
+    : resultados.size === 1 ? afirmacoes[0].resultado
+    : 'inconclusivo';
+  const [classificacao, resumo, corResultado] = RESULTADOS_API[resultado];
+  const oficiais = new Set(evidencias.filter(e => e.tipo_fonte === 'oficial' && e.posicao === 'confirma').map(e => e.dominio));
+  const requisito_ok = !sensiveis.length || oficiais.size >= 3;
+  const bloqueado = !requisito_ok && corResultado === 'verde';
+  return { afirmacoes, evidencias, respostas: dados.respostas || [], classificacao, resumo,
+    cor: bloqueado ? 'amarelo' : corResultado, status: resultado === 'inconclusivo' ? 'evidencias_insuficientes' : 'concluida',
+    oficiais_confirmando: oficiais.size, n_confirma, n_contradiz, requisito_ok, bloqueado, controversia: resultado === 'evidencias_mistas',
+    metodo: [...new Set(afirmacoes.map(a => a.metodo).filter(Boolean))].join(', ') || dados.metodo || 'sem_ia' };
+}
+
 function calcularScore(evidencias, sensiveis) {
   let score = 50;
   const vistos = new Set();
@@ -569,10 +598,11 @@ function calcularScore(evidencias, sensiveis) {
   const grupos = {};
   for (const e of evidencias) {
     if (vistos.has(e.dominio)) { e.contabilizada = false; e.peso_aplicado = 0; continue; } // 1 contribuição por domínio
-    vistos.add(e.dominio); e.contabilizada = true;
     let delta = 0;
     if (e.posicao === 'confirma') { delta = e.peso; conf++; if (e.tipo_fonte === 'oficial') oficiaisConf++; }
     else if (e.posicao === 'contradiz') { delta = -e.peso; contra++; }
+    else { e.contabilizada = false; e.peso_aplicado = 0; continue; }
+    vistos.add(e.dominio); e.contabilizada = true;
     e.peso_aplicado = delta;
     score += delta;
     const k = e.tipo_fonte + '|' + e.posicao;
@@ -581,12 +611,12 @@ function calcularScore(evidencias, sensiveis) {
   }
   const scoreBruto = score;
   score = clamp(Math.round(score), 0, 100);
-  const fatores = [{ texto: 'Ponto de partida (incerteza neutra)', valor: 50, tipo: 'base' }];
+  const fatores = [{ texto: 'Ponto de partida heurístico (neutro)', valor: 50, tipo: 'base' }];
   const nomeTipo = { oficial: ['fonte oficial', 'fontes oficiais'], academica: ['fonte acadêmica', 'fontes acadêmicas'], imprensa: ['veículo de imprensa', 'veículos de imprensa'], outra: ['outra fonte', 'outras fontes'] };
   const verbo = { confirma: ['confirma', 'confirmam'], contradiz: ['contradiz', 'contradizem'], neutra: ['traz contexto neutro', 'trazem contexto neutro'] };
   for (const g of Object.values(grupos)) {
     const pl = g.n > 1 ? 1 : 0;
-    fatores.push({ texto: `${g.n} ${nomeTipo[g.tipo][pl]} ${verbo[g.posicao][pl]}`, valor: g.soma, tipo: g.soma > 0 ? 'pos' : g.soma < 0 ? 'neg' : 'neu' });
+    fatores.push({ texto: `${g.n} ${(nomeTipo[g.tipo] || nomeTipo.outra)[pl]} ${verbo[g.posicao][pl]}`, valor: g.soma, tipo: g.soma > 0 ? 'pos' : g.soma < 0 ? 'neg' : 'neu' });
   }
   if (scoreBruto !== score) fatores.push({ texto: `Limite aplicado (score bruto ${scoreBruto} ajustado para a faixa 0–100)`, valor: score - scoreBruto, tipo: 'neu' });
 
@@ -596,20 +626,20 @@ function calcularScore(evidencias, sensiveis) {
   if (sensivel && !requisitoOk && score >= 70) { bloqueado = true; fatores.push({ texto: 'Tema sensível sem 3 fontes oficiais: selo verde bloqueado', valor: 69 - score, tipo: 'neg' }); score = 69; }
   const cor = score >= 70 ? 'verde' : score >= 40 ? 'amarelo' : 'vermelho';
   const controversia = conf > 0 && contra > 0;
-  const status = evidencias.length === 0 ? 'inconclusiva' : 'concluida';
+  const status = conf + contra === 0 ? 'evidencias_insuficientes' : 'concluida';
   return { score, score_bruto: scoreBruto, cor, fatores, controversia, bloqueado, requisito_ok: requisitoOk, oficiais_confirmando: oficiaisConf, n_confirma: conf, n_contradiz: contra, status, resumo: gerarResumo({ score, cor, conf, contra, oficiaisConf, sensiveis, bloqueado, controversia, status, requisitoOk }) };
 }
 
 function gerarResumo(r) {
   const temas = r.sensiveis.join(' e ');
-  if (r.status === 'inconclusiva') {
-    let s = 'Não localizamos fontes sobre esta afirmação nas fontes consultadas. Ausência de evidência não significa que a informação seja falsa: ela apenas não pôde ser confirmada. Procure a fonte original antes de compartilhar.';
+  if (r.status === 'evidencias_insuficientes') {
+    let s = 'As fontes consultadas não trouxeram evidências favoráveis ou contraditórias suficientes para estimar a confiabilidade. Ausência de evidência não significa que a informação seja falsa; consulte outras fontes independentes antes de concluir.';
     if (r.sensiveis.length) s += ` Como o tema envolve ${temas}, recomendamos consultar diretamente os canais oficiais.`;
     return s;
   }
   let s = '';
-  if (r.cor === 'verde') s = `As fontes localizadas concordam com a afirmação (${r.conf} confirmam${r.oficiaisConf ? `, sendo ${r.oficiaisConf} oficial${r.oficiaisConf > 1 ? 'is' : ''}` : ''}). O resultado indica boa sustentação nas evidências disponíveis, mas vale conferir o contexto na fonte original.`;
-  else if (r.cor === 'vermelho') s = `As fontes localizadas contradizem a afirmação (${r.contra} contradiz${r.contra > 1 ? 'em' : ''}${r.conf ? ` e apenas ${r.conf} confirma${r.conf > 1 ? 'm' : ''}` : ''}). Pelas evidências disponíveis, ela provavelmente é falsa ou não tem base.`;
+  if (r.cor === 'verde') s = `A heurística interna ficou na faixa de evidências favoráveis (${r.conf === 1 ? '1 classificação favorável' : `${r.conf} classificações favoráveis`}${r.oficiaisConf ? `, incluindo ${r.oficiaisConf} fonte${r.oficiaisConf === 1 ? '' : 's'} oficial${r.oficiaisConf === 1 ? '' : 'is'}` : ''}). Confira o contexto na fonte original.`;
+  else if (r.cor === 'vermelho') s = `Predominam evidências classificadas como contraditórias (${r.contra} contraditória${r.contra === 1 ? '' : 's'}${r.conf ? ` e ${r.conf} favorável${r.conf === 1 ? '' : 'is'}` : ''}). Isso não demonstra, por si só, que a afirmação seja falsa; leia as fontes e verifique o contexto.`;
   else if (r.bloqueado) s = `Há evidências a favor da afirmação, mas o tema é sensível (${temas}) e encontramos apenas ${r.oficiaisConf} fonte${r.oficiaisConf === 1 ? '' : 's'} oficial${r.oficiaisConf === 1 ? '' : 'is'} confirmando, abaixo das 3 exigidas. Por isso o selo verde foi bloqueado e o resultado fica como duvidoso.`;
   else s = 'As evidências são parciais ou mistas. A afirmação pode ter algum fundamento, mas precisa de contexto antes de ser compartilhada como fato.';
   if (r.controversia) s += ' Atenção: as fontes discordam entre si.';
@@ -650,8 +680,10 @@ async function salvarChecagem(usuarioId, r, iaOrigem) {
   const resultado = { score: r.score, score_bruto: r.score_bruto, cor: r.cor, tema: r.temas[0], temas: r.temas,
     tema_sensivel: r.sensiveis.length > 0, sensiveis: r.sensiveis, classificacao_confianca: r.confianca, resumo: r.resumo, fatores: r.fatores,
     controversia: r.controversia, bloqueado: r.bloqueado, requisito_ok: r.requisito_ok, oficiais_confirmando: r.oficiais_confirmando, status: r.status,
-    margem: r.margem ?? null, metodo: r.metodo || 'pesos', sem_fonte: !!r.sem_fonte, respostas: r.respostas || [] };
-  const fontes = r.evidencias.map(e => ({ fonte_nome: e.fonte_nome, dominio: e.dominio, url: e.url, tipo_fonte: e.tipo_fonte, posicao: e.posicao, trecho_relevante: e.trecho_relevante, data_consulta: e.data_consulta, peso_aplicado: e.peso_aplicado, contabilizada: e.contabilizada }));
+    n_confirma: r.n_confirma, n_contradiz: r.n_contradiz, justificativa_geral: r.justificativa_geral || '',
+    classificacao: r.classificacao, afirmacoes: r.afirmacoes,
+    margem: null, metodo: r.metodo || 'numerico', respostas: r.respostas || [] };
+  const fontes = r.evidencias.map(e => ({ afirmacao_id: e.afirmacao_id, fonte_nome: e.fonte_nome, dominio: e.dominio, url: e.url, tipo_fonte: e.tipo_fonte, posicao: e.posicao, trecho_relevante: e.trecho_relevante, justificativa: e.justificativa || '', data_consulta: e.data_consulta, peso_aplicado: e.peso_aplicado, contabilizada: e.contabilizada }));
   const a = await api('/analises', { method: 'POST', body: JSON.stringify({ usuario_id: usuarioId, texto: r.texto, ia_origem: iaOrigem, resultado, fontes }) });
   const [c, evs] = analiseParaChecagem(a);
   DB.data.checagens.push(c);
@@ -669,14 +701,20 @@ async function api(caminho, opcoes = {}) {
 // Converte a análise que vem do banco no formato que as telas usam
 function analiseParaChecagem(a) {
   const c = { ...a.resultado, id: String(a.id), usuario_id: a.usuario_id, texto: a.texto, ia_origem: a.ia_origem,
-    status_validacao: a.status_validacao, observacao: a.observacao, data: a.data };
+    status_validacao: a.status_validacao, observacao: a.observacao, data: a.data,
+    conclusao_usuario: a.conclusao_usuario || '', fontes_consultadas: a.fontes_consultadas || [] };
   const evs = a.fontes.map(e => ({ ...e, checagem_id: c.id }));
   return [c, evs];
 }
 
 async function carregarAnalises() {
   DB.data.checagens = []; DB.data.evidencias = [];
-  const lista = await api('/analises');
+  const u = usuarioAtual();
+  if (!u) return;
+  const caminho = u.tipo === 'admin'
+    ? '/analises'
+    : '/analises?usuario_id=' + encodeURIComponent(u.id);
+  const lista = await api(caminho);
   for (const a of lista) {
     const [c, evs] = analiseParaChecagem(a);
     DB.data.checagens.push(c);
@@ -689,28 +727,27 @@ function mascote(t = 40, rotulo = 'Mascote da Ptolomy.AI: sábio com capelo de f
   return `<svg width="${t}" height="${t}" viewBox="0 0 64 64" role="img" aria-label="${esc(rotulo)}"><circle cx="32" cy="38" r="19" fill="#f3e6c4" stroke="#0f1f3d" stroke-width="2.5"/><path d="M20 24v7c0 3.5 24 3.5 24 0v-7" fill="#1b2f57"/><path d="M6 19 32 9l26 10-26 10Z" fill="#0f1f3d"/><path d="M51 21.5v9" stroke="#c9a227" stroke-width="2"/><circle cx="51" cy="31.5" r="2.2" fill="#c9a227"/><circle cx="25" cy="38" r="2.2" fill="#0f1f3d"/><circle cx="39.5" cy="38" r="5.6" fill="#fff" fill-opacity=".55" stroke="#c9a227" stroke-width="2.4"/><circle cx="39.5" cy="38" r="2.2" fill="#0f1f3d"/><path d="M44.5 41c3.5 5 2.5 9-1 12" stroke="#c9a227" stroke-width="1.3" fill="none"/><path d="M32 46.5c-2.5-3.5-9-4-12.5.5 4.2.4 8 1.2 12.5-.5Zm0 0c2.5-3.5 9-4 12.5.5-4.2.4-8 1.2-12.5-.5Z" fill="#0f1f3d"/></svg>`;
 }
 const ICONE = { verde: '✓', amarelo: '!', vermelho: '✕' };
-const ROTULO = { verde: 'Confiável', amarelo: 'Duvidoso / precisa de contexto', vermelho: 'Provavelmente falso ou sem base' };
-const ROTULO_CURTO = { verde: 'Confiável', amarelo: 'Duvidoso', vermelho: 'Provavelmente falso' };
-const ROTULO_IA = { verde: 'Provavelmente verdadeiro', amarelo: 'Incerto: precisa de confirmação', vermelho: 'Provável alucinação ou informação falsa' };
+const ROTULO = { verde: 'Predominam evidências favoráveis', amarelo: 'Evidências mistas ou limitadas', vermelho: 'Predominam evidências contraditórias' };
+const ROTULO_CURTO = { verde: 'Favoráveis', amarelo: 'Mistas/limitadas', vermelho: 'Contraditórias' };
 const POSICAO = { confirma: ['✓', 'Confirma'], contradiz: ['✕', 'Contradiz'], neutra: ['–', 'Neutra / contexto'] };
 
-const pill = c => `<span class="pill p-${c.cor}"><span aria-hidden="true">${ICONE[c.cor]}</span><strong>${c.score}</strong><span class="sr-only"> de 100 —</span> ${ROTULO_CURTO[c.cor]}</span>`;
+const pill = c => c.classificacao
+  ? `<span class="pill p-${c.cor}"><span aria-hidden="true">${ICONE[c.cor]}</span> ${esc(c.classificacao)}</span>`
+  : c.status === 'evidencias_insuficientes' || c.status === 'inconclusiva'
+  ? `<span class="pill p-amarelo"><span aria-hidden="true">–</span><strong>—</strong> Evidências insuficientes</span>`
+  : `<span class="pill p-${c.cor}"><span aria-hidden="true">${ICONE[c.cor]}</span><strong>${c.score}</strong><span class="sr-only"> índice heurístico de 100 —</span> ${ROTULO_CURTO[c.cor]}</span>`;
 const badgesTema = temas => `<span class="badges">${temas.map(t => `<span class="badge ${SENSIVEIS.includes(t) ? 'sens' : ''}">${SENSIVEIS.includes(t) ? '<span aria-hidden="true">⚑</span> ' : ''}${esc(t)}${SENSIVEIS.includes(t) ? '<span class="sr-only"> (tema sensível)</span>' : ''}</span>`).join('')}</span>`;
 
 function vazio(titulo, texto, acaoHtml = '') {
   return `<div class="card empty"><div class="mascot-wrap">${mascote(56)}</div><h2>${titulo}</h2><p>${texto}</p>${acaoHtml}</div>`;
 }
 
-// Com margem (resultado da IA): mostra a chance em % e uma faixa sombreada de (chance − margem) a (chance + margem)
-function medidor(score, cor, margem) {
-  const temMargem = typeof margem === 'number';
-  const ini = temMargem ? Math.max(0, score - margem) : 0, fim = temMargem ? Math.min(100, score + margem) : 0;
+function medidor(score, cor) {
   return `<svg class="gauge" viewBox="0 0 200 120" aria-hidden="true">
     <path d="M20 105A80 80 0 0 1 180 105" fill="none" stroke="#ece8dc" stroke-width="16" stroke-linecap="round"/>
     <path d="M20 105A80 80 0 0 1 180 105" fill="none" stroke="var(--c-${cor})" stroke-width="16" stroke-linecap="round" pathLength="100" stroke-dasharray="${Math.max(score, 0.5)} 100"/>
-    ${temMargem ? `<path d="M20 105A80 80 0 0 1 180 105" fill="none" stroke="#0f1f3d" stroke-opacity=".22" stroke-width="6" pathLength="100" stroke-dasharray="0 ${ini} ${Math.max(fim - ini, 0.5)} 100"/>` : ''}
-    <text x="100" y="92" text-anchor="middle" font-family="Fraunces, Georgia, serif" font-weight="700" font-size="42" fill="#0f1f3d">${score}${temMargem ? '<tspan font-size="22">%</tspan>' : ''}</text>
-    <text x="100" y="114" text-anchor="middle" font-size="12" fill="#545e73">${temMargem ? `veracidade · margem ±${margem}` : 'de 100'}</text></svg>`;
+    <text x="100" y="92" text-anchor="middle" font-family="Fraunces, Georgia, serif" font-weight="700" font-size="42" fill="#0f1f3d">${score}</text>
+    <text x="100" y="114" text-anchor="middle" font-size="12" fill="#545e73">heurística · de 100</text></svg>`;
 }
 
 /* ---------- Modal acessível ---------- */
@@ -772,10 +809,10 @@ function vLogin() {
     <section class="auth-hero" aria-labelledby="hero-t">
       <div class="mascot-wrap">${mascote(70)}</div>
       <h1 id="hero-t" tabindex="-1">Verifique antes de compartilhar.</h1>
-      <p class="lead">A Ptolomy.AI analisa afirmações e respostas de IA, mostra as fontes encontradas e calcula um score de confiabilidade explicado.</p>
+      <p class="lead">Questione. Verifique. Aprenda. Compare respostas de IA com fontes e construa sua própria conclusão.</p>
       <ul class="ticks">
-        <li>Score de 0 a 100 com explicação do cálculo</li>
-        <li>Evidências com link, tipo de fonte e posição</li>
+        <li>Trechos consultados com links diretos para as fontes</li>
+        <li>Pesquisa independente e registro da sua conclusão</li>
         <li>Regras rígidas para Saúde, Finanças e Eleições</li>
       </ul>
     </section>
@@ -813,6 +850,8 @@ function vLogin() {
       }
       delete DB.data.tentativas[email]; DB.salvar();
       iniciarSessao(u);
+      try { await carregarAnalises(); }
+      catch (err) { toast('Não foi possível carregar seu histórico do servidor.', 'erro'); }
       toast(`Olá, ${u.nome.split(' ')[0]}!`, 'ok');
       const voltar = sessionStorage.getItem('ptolomy_voltar'); sessionStorage.removeItem('ptolomy_voltar');
       ir(voltar || '#/checar');
@@ -861,6 +900,8 @@ function vCadastro() {
       const u = { id: uid('usr'), nome, email, senha_hash: await hashSenha(s1, sal), sal, data_cadastro: agoraISO(), data_atualizacao: agoraISO(), tipo: 'comum', email_verificado: false };
       DB.data.usuarios.push(u); DB.auditar('Novo cadastro', 'Usuário comum criado'); DB.salvar();
       iniciarSessao(u);
+      try { await carregarAnalises(); }
+      catch (err) { toast('Não foi possível carregar seu histórico do servidor.', 'erro'); }
       toast('Conta criada com sucesso. Bem-vindo(a)!', 'ok');
       ir('#/checar');
     };
@@ -882,7 +923,7 @@ function vChecar() {
   return { titulo: 'Nova checagem', html: `
   <div class="page-head">
     <h1 tabindex="-1">Nova checagem</h1>
-    <p class="lead">Cole uma afirmação ou a resposta de uma IA. A Ptolomy.AI procura fontes, classifica o tema e calcula um score de confiabilidade.</p>
+    <p class="lead">Cole uma afirmação ou resposta de IA. A ferramenta consulta resumos da Wikipédia e incentiva a verificação em fontes independentes.</p>
   </div>
   <ol class="steps" id="etapas" aria-label="Etapas da checagem">
     <li data-s="1"><span class="n">1</span>Inserir texto</li>
@@ -928,8 +969,8 @@ function vChecar() {
       <div style="display:flex;gap:12px;align-items:center;margin-bottom:10px">${mascote(44)}<h2 id="how-t" style="margin:0">Como funciona</h2></div>
       <ol>
         <li>Classificamos o tema e identificamos se é sensível (Saúde, Finanças ou Eleições).</li>
-        <li>Buscamos evidências em fontes oficiais, acadêmicas e de imprensa.</li>
-        <li>Calculamos o score a partir do tipo das fontes e da concordância entre elas.</li>
+        <li>Consultamos artigos da Wikipédia disponíveis para a afirmação.</li>
+        <li>Exibimos a posição encontrada; links externos são sugestões para sua própria pesquisa.</li>
         <li>Em temas sensíveis, o selo verde exige pelo menos 3 fontes oficiais.</li>
       </ol>
       <p class="nota" style="margin-bottom:0">O resultado fica salvo automaticamente no seu histórico.</p>
@@ -988,8 +1029,8 @@ function vChecar() {
         const c = await salvarChecagem(u.id, r, ia);
         etapa(4);
         saida.innerHTML = htmlResultado(c, DB.data.evidencias.filter(e => e.checagem_id === c.id), true);
-        ligarResultado(saida, () => { ta.value = ''; atualizarCont(); rev.hidden = true; ini.hidden = false; etapa(1); saida.innerHTML = ''; ta.focus(); window.scrollTo({ top: 0 }); });
-        anunciar(`Verificação concluída. Score ${c.score} de 100: ${ROTULO[c.cor]}.`);
+        ligarResultado(saida, () => { ta.value = ''; atualizarCont(); rev.hidden = true; ini.hidden = false; etapa(1); saida.innerHTML = ''; ta.focus(); window.scrollTo({ top: 0 }); }, c);
+        anunciar('Verificação concluída. ' + c.classificacao + '.');
         $('#res-t').focus();
       } catch (err) {
         if (minhaExec !== execucaoAtual) return;
@@ -1008,27 +1049,53 @@ function vChecar() {
 
 function esqueleto() {
   return `<div class="result" aria-busy="true"><div class="card"><div class="skeleton" style="height:120px;width:220px;max-width:100%;margin:0 auto"></div><div class="skeleton sk-line" style="width:60%;margin:16px auto"></div><div class="skeleton sk-line"></div><div class="skeleton sk-line" style="width:80%"></div></div>
-  <div class="card"><p class="muted" style="margin-bottom:6px">Buscando evidências em fontes oficiais, acadêmicas e de imprensa…</p>${'<div class="skeleton" style="height:84px;margin-top:12px"></div>'.repeat(3)}</div></div>`;
+  <div class="card"><p class="muted" style="margin-bottom:6px">Consultando artigos e trechos da Wikipédia…</p>${'<div class="skeleton" style="height:84px;margin-top:12px"></div>'.repeat(3)}</div></div>`;
 }
 
 /* ----- Resultado (usado na checagem e no detalhe do histórico) ----- */
+const FONTES_PESQUISA = [
+  { id: 'google_academico', nome: 'Google Acadêmico', base: 'https://scholar.google.com/scholar?q=' },
+  { id: 'scielo', nome: 'SciELO', base: 'https://search.scielo.org/?q=' },
+  { id: 'gov_br', nome: 'Gov.br', base: 'https://www.google.com/search?q=' },
+  { id: 'ibge', nome: 'IBGE', base: 'https://www.google.com/search?q=' },
+  { id: 'wikipedia', nome: 'Wikipédia', base: 'https://pt.wikipedia.org/w/index.php?search=' },
+];
+function urlPesquisa(fonte, texto) {
+  const consulta = fonte.id === 'gov_br' ? `site:gov.br ${texto}`
+    : fonte.id === 'ibge' ? `site:ibge.gov.br ${texto}` : texto;
+  return fonte.base + encodeURIComponent(consulta);
+}
+
 function htmlResultado(c, evs, novo) {
+  const temEvidenciaDecisiva = evs.some(e => e.posicao === 'confirma' || e.posicao === 'contradiz');
+  const insuficiente = !temEvidenciaDecisiva;
+  const resultadoAPI = Boolean(c.classificacao);
+  const fontesConsultadas = c.fontes_consultadas || [];
+  const fontesPesquisa = FONTES_PESQUISA.map(f => `<li class="pesquisa-item">
+    <input type="checkbox" name="fontes_consultadas" value="${f.id}" id="fonte-${f.id}" ${fontesConsultadas.includes(f.id) ? 'checked' : ''}>
+    <div><label for="fonte-${f.id}">${esc(f.nome)}</label>
+    <a href="${esc(urlPesquisa(f, c.texto))}" target="_blank" rel="noopener noreferrer">Abrir busca contextualizada <span aria-hidden="true">↗</span><span class="sr-only">(abre em nova aba)</span></a><br><span class="hint">Marque após consultar</span></div>
+  </li>`).join('');
+  const justificativaIA = c.justificativa_geral
+    ? `<p class="hint"><strong>Leitura automatizada:</strong> ${esc(c.justificativa_geral)}</p>` : '';
   const avisosDominio = {
     'Saúde': 'Este resultado não é orientação médica. Consulte profissionais de saúde e os canais oficiais do Ministério da Saúde.',
     'Finanças': 'Este resultado não é recomendação de investimento. Consulte o Banco Central, a CVM e profissionais habilitados.',
     'Eleições': 'Para informações eleitorais, consulte sempre o TSE e o TRE do seu estado.',
   };
-  const fatores = c.fatores.map(f => `<li><span>${esc(f.texto)}</span><span class="v ${f.tipo === 'base' || f.tipo === 'margem' ? 'neu' : f.tipo === 'risco' ? (f.valor >= 60 ? 'neg' : 'neu') : f.tipo}">${f.tipo === 'base' ? f.valor + (c.metodo === 'ia' ? '%' : '') : f.tipo === 'risco' ? f.valor + '%' : f.tipo === 'margem' ? '±' + f.valor : (f.valor > 0 ? '+' : f.valor < 0 ? '−' : '±') + Math.abs(f.valor)}</span></li>`).join('')
+  const fatores = resultadoAPI ? '' : (insuficiente ? [] : c.fatores || []).filter(f => f.texto !== 'Score final').map(f => `<li><span>${esc(f.texto)}</span><span class="v ${f.tipo === 'base' || f.tipo === 'margem' ? 'neu' : f.tipo === 'risco' ? (f.valor >= 60 ? 'neg' : 'neu') : f.tipo}">${f.tipo === 'base' ? f.valor : f.tipo === 'risco' ? f.valor + '%' : f.tipo === 'margem' ? '±' + f.valor : (f.valor > 0 ? '+' : f.valor < 0 ? '−' : '±') + Math.abs(f.valor)}</span></li>`).join('')
     + (c.tema_sensivel ? `<li><span>Tema sensível (${esc(c.sensiveis.join(', '))}): requisito de 3 fontes oficiais</span><span class="v ${c.requisito_ok ? 'pos' : 'neg'}">${c.requisito_ok ? 'atendido' : `não atendido (${c.oficiais_confirmando}/3)`}</span></li>` : '')
-    + `<li><strong>Score final</strong><span class="v"><strong>${c.score}</strong></span></li>`;
+    + (insuficiente ? '' : `<li><strong>Índice estimado</strong><span class="v"><strong>${c.score}</strong></span></li>`);
   const evHtml = evs.length ? `<ul class="ev-list">${evs.map(e => {
     const url = e.url ? urlSegura(e.url) : null;
-    const [ic, pos] = POSICAO[e.posicao];
+    const [ic, pos] = POSICAO[e.posicao] || POSICAO.neutra;
     return `<li class="ev ${e.posicao}">
-      <div class="ev-top"><strong>${esc(e.fonte_nome)}</strong><span class="badge ${e.tipo_fonte}">${TIPOS_FONTE[e.tipo_fonte]}</span></div>
-      ${url ? `<a class="dom" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(e.dominio)} <span aria-hidden="true">↗</span><span class="sr-only"> (abre em nova aba)</span></a>` : `<span class="hint">${esc(e.dominio)} — link indisponível (fonte fictícia)</span>`}
-      <p>${esc(e.trecho_relevante)}</p>
-      <div class="ev-meta"><span class="pos-tag ${e.posicao}"><span aria-hidden="true">${ic}</span>${pos}</span><span>Consultada em ${fmtData(e.data_consulta)}</span><span>${e.contabilizada ? `Impacto: ${e.peso_aplicado > 0 ? '+' : e.peso_aplicado < 0 ? '−' : ''}${Math.abs(e.peso_aplicado)}` : 'Não contabilizada (domínio repetido)'}</span></div>
+      <div class="ev-top"><strong>${esc(e.fonte_nome || 'Fonte consultada')}</strong><span class="badge ${e.tipo_fonte || 'outra'}">${TIPOS_FONTE[e.tipo_fonte] || 'Fonte consultada'}</span></div>
+      ${url ? `<a class="dom" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(e.dominio || e.url)} <span aria-hidden="true">↗</span><span class="sr-only"> (abre em nova aba)</span></a>` : `<span class="hint">Link indisponível</span>`}
+      ${resultadoAPI && c.afirmacoes.length > 1 && e.afirmacao_id != null ? `<p class="hint">${esc(c.afirmacoes.find(a => a.id === e.afirmacao_id)?.texto || "")}</p>` : ""}
+      ${e.trecho_relevante ? `<p>${esc(e.trecho_relevante)}</p>` : ""}
+      ${e.justificativa ? `<p class="hint">${esc(e.justificativa)}</p>` : ''}
+      <div class="ev-meta"><span class="pos-tag ${e.posicao}"><span aria-hidden="true">${ic}</span>${pos}</span>${e.data_consulta ? `<span>Consultada em ${fmtData(e.data_consulta)}</span>` : ''}${!resultadoAPI && e.contabilizada === false ? '<span>Mesmo domínio já considerado</span>' : ''}</div>
     </li>`; }).join('')}</ul>`
     : `<div class="empty" style="padding:20px"><p>Nenhuma fonte foi localizada para esta afirmação.</p></div>`;
 
@@ -1038,10 +1105,13 @@ function htmlResultado(c, evs, novo) {
   </div>
   <div class="result">
     <div class="stack">
-      <div class="card score-card cor-${c.cor}">
-        ${medidor(c.score, c.cor, c.margem)}
-        <p class="score-label ${c.cor}"><span class="ic-circle ic-${c.cor}" aria-hidden="true">${ICONE[c.cor]}</span><span><span class="sr-only">${typeof c.margem === 'number' ? `Veracidade de ${c.score}%, margem de erro de ${c.margem} pontos: ` : `Score ${c.score} de 100: `}</span>${c.status === 'inconclusiva' ? 'Inconclusivo — ' : ''}${(c.metodo === 'ia' ? ROTULO_IA : ROTULO)[c.cor]}</span></p>
-        ${c.metodo === 'ia' ? `<p class="hint" style="margin:6px 0 0">Risco de alucinação: <strong>${100 - c.score}%</strong>${c.sem_fonte ? ' · <strong>sem confirmação nas fontes</strong>' : ''}</p>` : ''}
+      <div class="card score-card cor-${!resultadoAPI && insuficiente ? 'amarelo' : c.cor}">
+        <h3>${resultadoAPI ? 'Classificação da informação' : insuficiente ? 'Evidências insuficientes' : 'Índice estimado de confiabilidade'}</h3>
+        ${resultadoAPI ? `<p class="score-label ${c.cor}">${esc(c.classificacao)}</p>` : `
+          ${insuficiente ? '<p class="score-label amarelo">Não há índice para esta análise</p>' : medidor(c.score, c.cor)}
+        ${!insuficiente ? `<p class="score-label ${c.cor}"><span class="ic-circle ic-${c.cor}" aria-hidden="true">${ICONE[c.cor]}</span><span>${c.score >= 70 ? 'Predominam evidências favoráveis' : c.score < 40 ? 'Predominam evidências contraditórias' : 'Evidências mistas ou limitadas'}</span></p>` : ''}
+        <p class="hint" style="margin:6px 0 0">É uma heurística de apoio baseada nas evidências e nos pesos operacionais das fontes; não é uma probabilidade validada. Uma pontuação elevada não garante que a informação seja verdadeira.</p>
+        `}
         <div style="display:flex;justify-content:center">${badgesTema(c.temas)}</div>
         <p class="hint" style="margin-top:8px">Classificação do tema: confiança ${c.classificacao_confianca}${c.classificacao_confianca !== 'alta' ? '. Se a afirmação tratar de Saúde, Finanças ou Eleições, indique o tema manualmente e verifique de novo.' : '.'}</p>
       </div>
@@ -1051,29 +1121,89 @@ function htmlResultado(c, evs, novo) {
           <p style="margin:0 0 6px">${esc(x.resposta)}</p>
           ${x.encontrada && x.fonte
             ? `<p class="hint" style="margin:0">Fonte: <a href="${esc(x.fonte.url)}" target="_blank" rel="noopener noreferrer">Wikipédia — ${esc(x.fonte.titulo)} <span aria-hidden="true">↗</span><span class="sr-only"> (abre em nova aba)</span></a>${x.trecho ? ` · “${esc(x.trecho)}”` : ''}</p>`
-            : `<p class="hint" style="margin:0">Sem fonte: a Wikipédia não trouxe essa informação, então a IA respondeu com o próprio conhecimento. Confira antes de usar.</p>`}
-          <p class="hint" style="margin:4px 0 0">Chance de estar certa: <strong>${x.chance_acerto}%</strong> (margem de erro ±${x.margem})</p>
+            : `<p class="hint" style="margin:0">Resposta sem trecho confirmado em uma fonte. Consulte outras fontes antes de usar.</p>`}
         </div>`).join('')}</div>` : ''}
       <div class="card"><h3>Texto verificado</h3><blockquote class="texto">${esc(c.texto)}</blockquote></div>
       ${c.tema_sensivel && !c.requisito_ok ? `<div class="alert alert-warn" role="note"><span class="ic" aria-hidden="true">⚑</span><div><strong>Tema sensível: não encontramos fontes oficiais suficientes para confirmar esta informação.</strong><p>${c.bloqueado ? 'O selo verde foi bloqueado pela regra de temas sensíveis.' : `Foram encontradas ${c.oficiais_confirmando} de 3 fontes oficiais confirmando.`}</p></div></div>` : ''}
-      ${c.controversia ? `<div class="alert alert-danger" role="note"><span class="ic" aria-hidden="true">⚠</span><div><strong>Alerta de controvérsia</strong><p>As fontes discordam entre si: algumas confirmam e outras contradizem a afirmação. Leia as evidências antes de tirar conclusões.</p></div></div>` : ''}
+      ${c.controversia ? `<div class="alert alert-danger" role="note"><span class="ic" aria-hidden="true">⚠</span><div><strong>Alerta de controvérsia</strong><p>Há trechos favoráveis e contraditórios sobre a mesma afirmação. Confira o contexto nas fontes.</p></div></div>` : ''}
       <div class="card">
         <h3>Resumo</h3>
-        <p>${esc(c.resumo)}</p>
-        <h3 style="margin-top:18px">Como chegamos a este score</h3>
-        <ul class="fatores">${fatores}</ul>
-        <p class="nota">${c.metodo === 'ia' ? 'A veracidade é avaliada pela IA a partir dos trechos das fontes; o risco de alucinação é o que falta para 100%. Quando nenhuma fonte confirma nem contradiz, a IA estima pelo próprio conhecimento e a margem vai ao máximo (±40). Com fontes, a margem começa em ±35, cai 10 para cada fonte que confirma ou contradiz (mínimo ±5) e sobe 15 quando as fontes discordam entre si. A faixa sombreada no medidor mostra essa margem.' : 'O score é uma estimativa baseada nas fontes localizadas, no tipo das fontes e na concordância entre elas.'} Ele não substitui avaliação profissional ou consulta à fonte original.${c.sensiveis.map(t => ' ' + avisosDominio[t]).join('')}</p>
+        ${!resultadoAPI || c.afirmacoes.length !== 1 ? `<p>${esc(c.resumo)}</p>` : ''}
+        ${resultadoAPI ? (c.afirmacoes || []).map(a => {
+          const [rotulo, conclusao] = RESULTADOS_API[a.resultado];
+          const { compativeis, divergentes, inconclusivas } = a.comparacoes;
+          return `<section style="margin-top:16px">
+            <h4>${esc(a.texto)}</h4>
+            <p><strong>${esc(rotulo)}</strong> · ${esc(conclusao)}</p>
+            <p>Compatíveis: ${esc(compativeis)} · Divergentes: ${esc(divergentes)} · Inconclusivas: ${esc(inconclusivas)}</p>
+            <p class="hint">Método: ${esc(METODOS_API[a.metodo] || a.metodo || 'Não informado')}${a.diagnostico_ia === 'chave_ausente' ? ' · Claude sem chave configurada' : ''}</p>
+            ${a.justificativa ? `<p>${esc(a.justificativa)}</p>` : ''}
+          </section>`;
+        }).join('') : '' }
+        ${resultadoAPI ? '' : insuficiente ? '<h3 style="margin-top:18px">Índice estimado</h3><p>Não exibido porque não foram encontradas evidências favoráveis ou contraditórias suficientes. Consulte outras fontes independentes antes de concluir.</p>' : `<h3 style="margin-top:18px">Como chegamos ao índice</h3><ul class="fatores">${fatores}</ul>`}
+        ${justificativaIA}
+        <p class="nota">Confira a classificação automatizada com os trechos e as fontes originais.${(c.sensiveis || []).map(t => ' ' + (avisosDominio[t] || '')).join('')}</p>
       </div>
     </div>
     <div class="card">
       <h3>Evidências <span class="muted" style="font-family:var(--font);font-weight:500">(${evs.length})</span></h3>
-      <p class="hint" style="margin-top:-4px;margin-bottom:12px">Evidências da Wikipédia levam ao artigo; as da base local levam à página inicial da fonte.</p>
+      <p class="hint" style="margin-top:-4px;margin-bottom:12px">Estas são as fontes efetivamente consultadas pela ferramenta. As fontes sugeridas para pesquisa independente aparecem separadamente abaixo.</p>
       ${evHtml}
     </div>
   </div>
+  <section class="card" style="margin-top:18px" aria-labelledby="crosscheck-t">
+    <h3 id="crosscheck-t">Questione. Verifique. Aprenda.</h3>
+    <p>Cross-checking é comparar a afirmação com fontes independentes. Os links abaixo são sugestões de busca: a Ptolomy.AI não consultou nem verificou o conteúdo delas.</p>
+    <form id="f-crosscheck">
+      <ul class="pesquisa-lista">${fontesPesquisa}</ul>
+      <div class="field"><label for="conclusao-usuario">Minha conclusão, após consultar as fontes</label>
+        <select id="conclusao-usuario">
+          <option value="">Ainda não registrei uma conclusão</option>
+          <option value="confirmada" ${c.conclusao_usuario === 'confirmada' ? 'selected' : ''}>Informação confirmada pelas evidências</option>
+          <option value="contradita" ${c.conclusao_usuario === 'contradita' ? 'selected' : ''}>Informação contradita pelas evidências</option>
+          <option value="evidencias_insuficientes" ${c.conclusao_usuario === 'evidencias_insuficientes' ? 'selected' : ''}>Evidências insuficientes</option>
+          <option value="necessita_pesquisa" ${c.conclusao_usuario === 'necessita_pesquisa' ? 'selected' : ''}>Necessita de mais pesquisa</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" type="submit">Salvar fontes consultadas e minha conclusão</button>
+      <p class="hint" role="status" id="crosscheck-status">${c.conclusao_usuario ? 'Sua conclusão está registrada separadamente do resultado automatizado.' : ''}</p>
+    </form>
+    <p class="nota"><strong>Aprenda:</strong> modelos de IA podem alucinar — gerar conteúdo convincente, mas incorreto — porque predizem texto e não garantem fatos. Prefira fontes originais, independentes, atualizadas e com autoria/metodologia claras. A Ptolomy.AI também tem limitações e não substitui sua avaliação.</p>
+  </section>
   <div class="actions"><button class="btn btn-gold" data-nova>Nova checagem</button><a class="btn btn-ghost" href="#/historico">Ver histórico</a></div>`;
 }
-function ligarResultado(el, aoNova) { const b = $('[data-nova]', el); if (b) b.onclick = aoNova || (() => ir('#/checar')); }
+function ligarResultado(el, aoNova, c) {
+  const b = $('[data-nova]', el);
+  if (b) b.onclick = aoNova || (() => ir('#/checar'));
+  const form = $('#f-crosscheck', el);
+  if (!form || !c) return;
+  form.onsubmit = async e => {
+    e.preventDefault();
+    const status = $('#crosscheck-status', form);
+    const botao = $('button[type=submit]', form);
+    botao.disabled = true;
+    try {
+      const atualizada = await api('/analises/' + encodeURIComponent(c.id), {
+        method: 'PUT',
+        body: JSON.stringify({
+          status_validacao: c.status_validacao || 'não verificado',
+          observacao: c.observacao || '',
+          conclusao_usuario: $('#conclusao-usuario', form).value,
+          fontes_consultadas: $$('input[name="fontes_consultadas"]:checked', form).map(input => input.value)
+        })
+      });
+      c.conclusao_usuario = atualizada.conclusao_usuario;
+      c.fontes_consultadas = atualizada.fontes_consultadas;
+      status.textContent = 'Registro salvo. Sua conclusão é independente do resultado automatizado.';
+      toast('Cross-checking registrado.', 'ok');
+    } catch (err) {
+      status.textContent = 'Não foi possível salvar. Tente novamente.';
+      toast('Não foi possível salvar seu cross-checking.', 'erro');
+    } finally {
+      botao.disabled = false;
+    }
+  };
+}
 
 /* ----- Histórico ----- */
 const filtroHist = { busca: '', cor: '', tema: '', pagina: 1 };
@@ -1083,14 +1213,14 @@ function vHistorico() {
   const minhas = DB.data.checagens.filter(c => c.usuario_id === u.id).sort((a, b) => b.data.localeCompare(a.data));
   const temas = [...new Set(minhas.flatMap(c => c.temas))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
   const cab = `<div class="page-head"><h1 tabindex="-1">Histórico</h1><p class="lead">Todas as suas checagens, da mais recente para a mais antiga. Abra uma para ver o resultado completo.</p></div>`;
-  if (!minhas.length) return { titulo: 'Histórico', html: cab + vazio('Você ainda não fez nenhuma checagem', 'Quando verificar uma afirmação, ela aparecerá aqui com o score e o tema.', '<a class="btn btn-primary" href="#/checar">Fazer a primeira checagem</a>') };
+  if (!minhas.length) return { titulo: 'Histórico', html: cab + vazio('Você ainda não fez nenhuma checagem', 'Quando verificar uma afirmação, ela aparecerá aqui com a classificação e o tema.', '<a class="btn btn-primary" href="#/checar">Fazer a primeira checagem</a>') };
   const aberto = window.matchMedia('(min-width: 768px)').matches;
   return { titulo: 'Histórico', html: cab + `
   <details class="card filtros" ${aberto ? 'open' : ''}>
     <summary>Busca e filtros</summary>
     <form id="f-filtros" class="filtros-grid" role="search" onsubmit="return false">
       <div class="field"><label for="h-busca">Buscar por palavra</label><input id="h-busca" type="search" placeholder="Ex.: vacina, urna, poupança"></div>
-      <div class="field"><label for="h-cor">Resultado</label><select id="h-cor"><option value="">Todos</option><option value="verde">Confiável</option><option value="amarelo">Duvidoso</option><option value="vermelho">Provavelmente falso</option></select></div>
+      <div class="field"><label for="h-cor">Classificação</label><select id="h-cor"><option value="">Todas</option><option value="verde">Mais evidências favoráveis</option><option value="amarelo">Mistas ou limitadas</option><option value="vermelho">Mais evidências contraditórias</option></select></div>
       <div class="field"><label for="h-tema">Tema</label><select id="h-tema"><option value="">Todos</option>${temas.map(t => `<option>${esc(t)}</option>`).join('')}</select></div>
       <div class="field"><button type="button" class="btn btn-ghost w100" id="h-limpar">Limpar filtros</button></div>
     </form>
@@ -1110,7 +1240,7 @@ function vHistorico() {
       const pag = lista.slice((filtroHist.pagina - 1) * POR_PAGINA, filtroHist.pagina * POR_PAGINA);
       const filtrando = q || cor.value || tem.value;
       $('#h-cont').textContent = filtrando ? `${lista.length} de ${minhas.length} checagens correspondem aos filtros.` : `${minhas.length} checagens no total.`;
-      $('#h-lista').innerHTML = pag.length ? pag.map(c => `<li><a class="hist-item" href="#/checagem/${encodeURIComponent(c.id)}">${pill(c)}<span class="hi-txt"><span class="hi-trecho">${esc(trunc(c.texto, 150))}</span><span class="hi-meta">${fmtDataHora(c.data)} · IA: ${esc(c.ia_origem)} · Status: ${esc(c.status_validacao)} · ${esc(c.temas.join(', '))}${c.status === 'inconclusiva' ? ' · Inconclusiva' : ''}${c.controversia ? ' · Fontes divergentes' : ''}</span></span><span class="hi-go" aria-hidden="true">›</span></a></li>`).join('')
+      $('#h-lista').innerHTML = pag.length ? pag.map(c => `<li><a class="hist-item" href="#/checagem/${encodeURIComponent(c.id)}">${pill(c)}<span class="hi-txt"><span class="hi-trecho">${esc(trunc(c.texto, 150))}</span><span class="hi-meta">${fmtDataHora(c.data)} · IA: ${esc(c.ia_origem)} · Status: ${esc(c.status_validacao)} · ${esc(c.temas.join(', '))}${c.status === 'inconclusiva' || c.status === 'evidencias_insuficientes' ? ' · Evidências insuficientes' : ''}${c.conclusao_usuario ? ' · Conclusão registrada' : ''}${c.controversia ? ' · Fontes divergentes' : ''}</span></span><span class="hi-go" aria-hidden="true">›</span></a></li>`).join('')
         : `<li class="card empty" style="padding:24px"><p>Nenhuma checagem encontrada com esses filtros.</p><button class="btn btn-ghost btn-sm" id="h-limpar2">Limpar filtros</button></li>`;
       const l2 = $('#h-limpar2'); if (l2) l2.onclick = limpar;
       $('#h-pag').innerHTML = paginas > 1 ? `<button class="btn btn-ghost btn-sm" data-p="-1" ${filtroHist.pagina === 1 ? 'disabled' : ''}>‹ Anterior</button><span class="small">Página ${filtroHist.pagina} de ${paginas}</span><button class="btn btn-ghost btn-sm" data-p="1" ${filtroHist.pagina === paginas ? 'disabled' : ''}>Próxima ›</button>` : '';
@@ -1151,7 +1281,7 @@ function vDetalhe(id) {
   </section>
   <p class="hint">Este é o resultado registrado na data da checagem; ele não é recalculado ao ser aberto.</p>`,
     montar(m) {
-      ligarResultado(m);
+      ligarResultado(m, null, c);
       // UPDATE: manda o novo status e a observação para o backend
       $('#f-validacao', m).onsubmit = async e => {
         e.preventDefault();
@@ -1205,9 +1335,9 @@ function vPainel() {
 
   const kpis = `<div class="kpis">
     <div class="card kpi"><div class="n">${total}</div><div class="l">${escopoPainel === 'plataforma' ? 'checagens na plataforma' : 'checagens feitas'}</div></div>
-    <div class="card kpi"><div class="n" style="color:var(--t-verde)">${pct(cont.verde, total)}%</div><div class="l"><span aria-hidden="true">✓</span> confiáveis (${cont.verde})</div></div>
-    <div class="card kpi"><div class="n" style="color:var(--t-amarelo)">${pct(cont.amarelo, total)}%</div><div class="l"><span aria-hidden="true">!</span> duvidosas (${cont.amarelo})</div></div>
-    <div class="card kpi"><div class="n" style="color:var(--t-vermelho)">${pct(cont.vermelho, total)}%</div><div class="l"><span aria-hidden="true">✕</span> provavelmente falsas (${cont.vermelho})</div></div>
+    <div class="card kpi"><div class="n" style="color:var(--t-verde)">${pct(cont.verde, total)}%</div><div class="l"><span aria-hidden="true">✓</span> faixa favorável (${cont.verde})</div></div>
+    <div class="card kpi"><div class="n" style="color:var(--t-amarelo)">${pct(cont.amarelo, total)}%</div><div class="l"><span aria-hidden="true">!</span> faixa mista/limitada (${cont.amarelo})</div></div>
+    <div class="card kpi"><div class="n" style="color:var(--t-vermelho)">${pct(cont.vermelho, total)}%</div><div class="l"><span aria-hidden="true">✕</span> faixa contraditória (${cont.vermelho})</div></div>
   </div>
   ${escopoPainel === 'plataforma' ? `<p class="hint" style="margin-top:-6px;margin-bottom:16px">${DB.data.usuarios.length} usuários cadastrados · ${sens} checagens em temas sensíveis · ${DB.data.checagens.filter(c => c.controversia).length} com fontes divergentes</p>` : `<p class="hint" style="margin-top:-6px;margin-bottom:16px">${sens} das suas checagens envolveram temas sensíveis.</p>`}`;
 
@@ -1225,7 +1355,7 @@ function graficoRosca(cont, total) {
     const s = `<circle r="15.9155" cx="21" cy="21" fill="none" stroke="var(--c-${k})" stroke-width="6" stroke-dasharray="${p.toFixed(2)} ${(100 - p).toFixed(2)}" stroke-dashoffset="${(25 - acum).toFixed(2)}"/>`;
     acum += p; return s;
   }).join('');
-  const desc = `Distribuição: ${cont.verde} confiáveis (${pct(cont.verde, total)}%), ${cont.amarelo} duvidosas (${pct(cont.amarelo, total)}%), ${cont.vermelho} provavelmente falsas (${pct(cont.vermelho, total)}%).`;
+  const desc = `Distribuição das classificações: ${cont.verde} favoráveis (${pct(cont.verde, total)}%), ${cont.amarelo} mistas ou limitadas (${pct(cont.amarelo, total)}%), ${cont.vermelho} contraditórias (${pct(cont.vermelho, total)}%).`;
   return `<figcaption>Distribuição dos resultados</figcaption><div class="chart-sub">Todas as checagens do período · em quantidade e %</div>
   <div class="donut-wrap">
     <svg class="donut" viewBox="0 0 42 42" role="img" aria-label="${desc}"><circle r="15.9155" cx="21" cy="21" fill="none" stroke="#ece8dc" stroke-width="6"/>${segs}<text x="21" y="22.5" text-anchor="middle" font-size="7" font-weight="700" fill="#0f1f3d" font-family="Fraunces, Georgia, serif">${total}</text><text x="21" y="27.5" text-anchor="middle" font-size="2.6" fill="#545e73">checagens</text></svg>
@@ -1417,23 +1547,20 @@ function adminConfig(p) {
 
 /* ----- Sobre ----- */
 function vSobre() {
-  const linhaPeso = (t, v) => `<tr><td>${t}</td><td>${v}</td></tr>`;
   return { titulo: 'Sobre', html: `
   <div class="page-head" style="display:flex;gap:16px;align-items:center">${mascote(64)}<div><h1 tabindex="-1" style="margin:0">Sobre a Ptolomy.AI</h1><p class="muted" style="margin:0">Projeto acadêmico de checagem de fatos</p></div></div>
   <div class="two" style="margin-top:18px">
     <section class="card"><h2>O problema</h2><p>Notícias falsas se espalham rápido, e assistentes de IA às vezes produzem respostas convincentes, mas erradas (as chamadas “alucinações”). Sem saber de onde vem a informação, fica difícil decidir em que confiar.</p>
-      <h2 style="margin-top:18px">A proposta</h2><p>A Ptolomy.AI recebe uma afirmação, procura evidências, mostra cada fonte com seu tipo e posição e calcula um score de confiabilidade explicado. É uma ferramenta de apoio: não é uma autoridade infalível.</p></section>
-    <section class="card"><h2>Como o score é calculado</h2>
-      <div class="table-wrap"><table><thead><tr><th scope="col">Regra</th><th scope="col">Efeito</th></tr></thead><tbody>
-      ${linhaPeso('Ponto de partida', '50 (incerteza neutra)')}${linhaPeso('Fonte oficial confirmando', '+30')}${linhaPeso('Fonte acadêmica confirmando', '+20')}${linhaPeso('Imprensa confiável confirmando', '+15')}${linhaPeso('Fonte contradizendo', 'subtrai o mesmo peso')}${linhaPeso('Fonte neutra', '0')}${linhaPeso('Mesmo domínio repetido', 'conta uma vez só')}${linhaPeso('Limite', '0 a 100')}${linhaPeso('Saúde, Finanças ou Eleições', 'verde só com 3+ fontes oficiais')}
-      </tbody></table></div>
-      <p class="hint" style="margin-top:10px">Faixas: 70–100 confiável · 40–69 duvidoso / precisa de contexto · 0–39 provavelmente falso ou sem base.</p></section>
+      <h2 style="margin-top:18px">A proposta</h2><p>A ferramenta consulta artigos da Wikipédia, mostra trechos e uma classificação automatizada, e oferece caminhos para o usuário fazer cross-checking e construir a própria conclusão. Não substitui o julgamento humano.</p></section>
+    <section class="card"><h2>Como interpretar a classificação</h2>
+      <p>A classificação indica se os trechos consultados sustentam ou contradizem cada afirmação. Vários trechos podem vir da mesma fonte. O histórico pode conter índices heurísticos de análises anteriores.</p>
+      <p>A busca automática pode consultar Wikipédia, IBGE e Wikidata. Use os links de cross-checking para pesquisar o mesmo assunto em outras fontes.</p></section>
   </div>
   <div class="two" style="margin-top:18px">
     <section class="card"><h2>Limitações atuais</h2><ul>
-      <li>Funciona só no navegador: os dados ficam salvos no próprio computador (localStorage), não em um servidor.</li>
-      <li>Afirmações fora da <strong>base local</strong> são verificadas pelo backend em Python, que busca na Wikipédia e compara os números; sem frases parecidas, o resultado fica inconclusivo.</li>
-      <li>Senhas são guardadas com hash, mas o isolamento entre usuários ainda é feito no navegador. A próxima versão precisa de backend (ex.: Python + Supabase com regras de acesso por usuário).</li>
+      <li>A IA pode interpretar incorretamente um trecho; a ferramenta confirma que a citação exibida aparece no resumo consultado, mas não garante que a interpretação esteja correta.</li>
+      <li>Sem chave de IA, o backend local compara números e algumas relações. No Netlify, a consulta de fontes gera uma classificação inconclusiva.</li>
+      <li>Login e cadastro são demonstrativos e ficam no navegador. A API não tem autenticação/autorização real; não use dados pessoais ou publique como serviço multiusuário sem implementar controle de acesso no servidor.</li>
     </ul></section>
     <section class="card"><h2>Equipe</h2><ul><li>Integrante 1</li><li>Integrante 2</li><li>Integrante 3</li><li>Integrante 4</li></ul><p class="hint">Edite esta lista com os nomes da equipe.</p></section>
   </div>` };

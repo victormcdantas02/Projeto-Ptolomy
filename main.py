@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from verificador import analisar_texto
 from banco import (
     STATUS_VALIDOS,
+    CONCLUSOES_USUARIO_VALIDAS,
     criar_tabela,
     salvar_analise,
     buscar_analise,
@@ -91,6 +92,8 @@ def editar(analise_id: int, dados: dict):
 
     status_validacao = dados.get("status_validacao", "")
     observacao = str(dados.get("observacao", ""))
+    conclusao_usuario = dados.get("conclusao_usuario")
+    fontes_consultadas = dados.get("fontes_consultadas")
 
     if status_validacao not in STATUS_VALIDOS:
         raise HTTPException(status_code=400, detail="Status inválido")
@@ -98,7 +101,23 @@ def editar(analise_id: int, dados: dict):
     if len(observacao) > 500:
         raise HTTPException(status_code=422, detail="A observação pode ter no máximo 500 caracteres")
 
-    alterou = atualizar_analise(analise_id, status_validacao, observacao)
+    if conclusao_usuario is not None and conclusao_usuario not in CONCLUSOES_USUARIO_VALIDAS:
+        raise HTTPException(status_code=400, detail="Conclusão do usuário inválida")
+
+    if fontes_consultadas is not None and (
+        not isinstance(fontes_consultadas, list)
+        or len(fontes_consultadas) > 20
+        or any(not isinstance(fonte, str) or len(fonte) > 100 for fonte in fontes_consultadas)
+    ):
+        raise HTTPException(status_code=422, detail="Lista de fontes consultadas inválida")
+
+    alterou = atualizar_analise(
+        analise_id,
+        status_validacao,
+        observacao,
+        conclusao_usuario,
+        fontes_consultadas,
+    )
 
     if not alterou:
         raise HTTPException(status_code=404, detail="Análise não encontrada")

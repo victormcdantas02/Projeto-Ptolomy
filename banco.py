@@ -7,6 +7,13 @@ ARQUIVO_BANCO = "ptolomy.db"
 
 # Status que o aluno pode escolher ao validar uma análise
 STATUS_VALIDOS = ["não verificado", "confirmado", "falso"]
+CONCLUSOES_USUARIO_VALIDAS = [
+    "",
+    "confirmada",
+    "contradita",
+    "evidencias_insuficientes",
+    "necessita_pesquisa",
+]
 
 
 def conectar():
@@ -29,9 +36,24 @@ def criar_tabela():
             fontes TEXT NOT NULL,
             status_validacao TEXT NOT NULL,
             observacao TEXT NOT NULL,
-            data TEXT NOT NULL
+            data TEXT NOT NULL,
+            conclusao_usuario TEXT NOT NULL DEFAULT '',
+            fontes_consultadas TEXT NOT NULL DEFAULT '[]'
         )
     """)
+
+    colunas = {
+        coluna[1]
+        for coluna in conexao.execute("PRAGMA table_info(analises)").fetchall()
+    }
+    if "conclusao_usuario" not in colunas:
+        conexao.execute(
+            "ALTER TABLE analises ADD COLUMN conclusao_usuario TEXT NOT NULL DEFAULT ''"
+        )
+    if "fontes_consultadas" not in colunas:
+        conexao.execute(
+            "ALTER TABLE analises ADD COLUMN fontes_consultadas TEXT NOT NULL DEFAULT '[]'"
+        )
 
     conexao.commit()
     conexao.close()
@@ -55,6 +77,10 @@ def linha_para_dict(linha):
         "data": linha[8]
     }
 
+    analise["conclusao_usuario"] = linha[9] if len(linha) > 9 else ""
+    analise["fontes_consultadas"] = (
+        json.loads(linha[10]) if len(linha) > 10 else []
+    )
     return analise
 
 
@@ -133,13 +159,33 @@ def listar_analises(usuario_id=None):
 
 # UPDATE - muda o status da validação e a observação
 # (devolve False se a análise não existir)
-def atualizar_analise(analise_id, status_validacao, observacao):
+def atualizar_analise(
+    analise_id,
+    status_validacao,
+    observacao,
+    conclusao_usuario=None,
+    fontes_consultadas=None,
+):
 
     conexao = conectar()
 
     cursor = conexao.execute(
-        "UPDATE analises SET status_validacao = ?, observacao = ? WHERE id = ?",
-        (status_validacao, observacao, analise_id)
+        """UPDATE analises
+           SET status_validacao = ?, observacao = ?,
+               conclusao_usuario = COALESCE(?, conclusao_usuario),
+               fontes_consultadas = COALESCE(?, fontes_consultadas)
+           WHERE id = ?""",
+        (
+            status_validacao,
+            observacao,
+            conclusao_usuario,
+            (
+                json.dumps(fontes_consultadas, ensure_ascii=False)
+                if fontes_consultadas is not None
+                else None
+            ),
+            analise_id,
+        )
     )
 
     conexao.commit()

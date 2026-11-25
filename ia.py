@@ -32,7 +32,7 @@ FORMATO = {
     "additionalProperties": False
 }
 
-INSTRUCOES = """Você é o verificador de fatos do Ptolomy.AI, um projeto acadêmico de checagem de fatos.
+INSTRUCOES = """Você é o assistente de análise de evidências do Ptolomy.AI, um projeto acadêmico de letramento em IA.
 
 Você recebe uma afirmação e trechos de artigos da Wikipédia em português, numerados. Para cada fonte, decida a posição dela em relação à afirmação, usando só o texto daquela fonte:
 - "confirma": o texto sustenta a afirmação.
@@ -41,7 +41,7 @@ Você recebe uma afirmação e trechos de artigos da Wikipédia em português, n
 
 Julgue pelo que o texto diz, não pelo seu conhecimento próprio: se a fonte não trata do que a afirmação diz, ela é neutra, mesmo que você saiba a resposta. Isso mantém o resultado ligado às fontes que o site mostra.
 
-Em "trecho", copie do texto da fonte a frase que sustenta a sua decisão, sem alterar; para "neutra", deixe vazio. Em "justificativa", explique em uma frase curta, em português, por que a fonte confirma, contradiz ou é neutra. Devolva uma avaliação para cada fonte recebida, com o mesmo número."""
+Em "trecho", copie do texto da fonte uma frase relevante, sem alterar; para "neutra", deixe vazio. Em "justificativa", explique em uma frase curta, em português, por que a fonte confirma, contradiz ou não permite concluir. Devolva uma avaliação para cada fonte recebida, com o mesmo número. Não estime probabilidades nem use conhecimento externo às fontes."""
 
 
 def ia_disponivel():

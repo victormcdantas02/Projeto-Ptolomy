@@ -1,5 +1,6 @@
 import anthropic
-import httpx2
+import httpx
+import pytest
 
 import ia
 import verificador
@@ -39,7 +40,7 @@ def ia_neutra(afirmacao, fontes):
 
 
 def ia_que_falha(afirmacao, fontes):
-    raise anthropic.APIConnectionError(request=httpx2.Request("POST", "https://api.anthropic.com"))
+    raise anthropic.APIConnectionError(request=httpx.Request("POST", "https://api.anthropic.com"))
 
 
 def ia_que_recusa(afirmacao, fontes):
@@ -81,11 +82,13 @@ def test_sem_chave_usa_comparacao_numerica():
 def test_erro_da_ia_usa_comparacao_numerica():
     afirmacao = analisar_com(ia_ligada, ia_que_falha, "Brasil é um país.")
     assert afirmacao["metodo"] == "numerico"
+    assert afirmacao["diagnostico_ia"] == "falha_conexao"
 
 
 def test_recusa_da_ia_usa_comparacao_numerica():
     afirmacao = analisar_com(ia_ligada, ia_que_recusa, "Brasil é um país.")
     assert afirmacao["metodo"] == "numerico"
+    assert afirmacao["diagnostico_ia"] == "resposta_indisponivel"
 
 
 def test_fonte_neutra_mostra_comeco_do_artigo():
@@ -99,3 +102,50 @@ def test_pedido_tem_afirmacao_e_fontes():
     assert "<afirmacao>Brasil é um país.</afirmacao>" in pedido
     assert 'indice="0"' in pedido
     assert "América do Sul" in pedido
+
+
+def test_trecho_inventado_nao_e_apresentado_como_evidencia():
+    fonte = {"titulo": "Brasil", "url": "https://exemplo.com", "descricao": "Texto real consultado."}
+    evidencia = verificador.montar_evidencias_ia(
+        [{
+            "indice": 0,
+            "posicao": "confirma",
+            "trecho": "Trecho que não existe na fonte.",
+            "justificativa": "A fonte confirma.",
+        }],
+        [fonte],
+    )[0]
+
+    assert evidencia["posicao"] == "neutra"
+    assert evidencia["trecho"] == fonte["descricao"]
+
+
+@pytest.mark.parametrize(
+    ("classe", "atributos", "esperado"),
+    [
+        (anthropic.APITimeoutError, {"request": httpx.Request("POST", "https://api.anthropic.com")}, "timeout"),
+        (anthropic.APIConnectionError, {"request": httpx.Request("POST", "https://api.anthropic.com")}, "falha_conexao"),
+    ],
+)
+def test_diagnosticos_de_rede_ia(classe, atributos, esperado):
+    assert verificador._categoria_falha_ia(classe(**atributos)) == esperado
+
+
+def test_diagnosticos_de_autenticacao_e_creditos():
+    resposta = httpx.Response(401, request=httpx.Request("POST", "https://api.anthropic.com"))
+    erro_auth = anthropic.AuthenticationError("autenticação", response=resposta, body=None)
+    erro_creditos = anthropic.APIStatusError(
+        "cota",
+        response=httpx.Response(402, request=httpx.Request("POST", "https://api.anthropic.com")),
+        body={"error": {"type": "billing_error"}},
+    )
+
+    assert verificador._categoria_falha_ia(erro_auth) == "erro_autenticacao"
+    assert verificador._categoria_falha_ia(erro_creditos) == "creditos_insuficientes"
+
+
+def test_chave_de_api_e_detectada_sem_expor_o_valor(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "valor-de-teste-nao-real")
+    assert ia.ia_disponivel()
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    assert not ia.ia_disponivel()
